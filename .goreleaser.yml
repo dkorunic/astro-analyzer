@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: 2026 Dinko Korunic
+# SPDX-License-Identifier: MIT
+
+version: 2
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - flags:
+      - -trimpath
+      - -pgo=auto
+    env:
+      - CGO_ENABLED=0
+    ldflags: |
+      -s -w -extldflags '-static' -X "main.GitTag={{.Tag}}" -X "main.GitCommit={{.ShortCommit}}" -X "main.GitDirty= " -X "main.BuildTime={{.Date}}"
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    goarm:
+      - 6
+      - 7
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: arm
+universal_binaries:
+  - replace: true
+changelog:
+  sort: asc
+archives:
+  - name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+      {{- if not (eq .Amd64 "v1") }}{{ .Amd64 }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+checksum:
+  name_template: "checksums.txt"
+snapshot:
+  version_template: "{{ .Tag }}-next"
+brews:
+  - name: astro-analyzer
+    directory: Formula
+    repository:
+      owner: dkorunic
+      name: homebrew-tap
+    homepage: https://github.com/dkorunic/astro-analyzer
+    description: "Fast local CLI that grades astrophotography FITS subframes: star count, FWHM, eccentricity, SNR, sky background and noise, with PixInsight-compatible measurements, outlier flagging, field tilt maps and drizzle recommendations."
+    license: MIT
+    test: |
+      system "#{bin}/astro-analyzer", "-version"
+    install: |
+      bin.install "astro-analyzer"
+homebrew_casks:
+  - name: astro-analyzer
+    binaries: [astro-analyzer]
+    repository:
+      owner: dkorunic
+      name: homebrew-tap
+    homepage: https://github.com/dkorunic/astro-analyzer
+    description: "Fast local CLI that grades astrophotography FITS subframes: star count, FWHM, eccentricity, SNR, sky background and noise, with PixInsight-compatible measurements, outlier flagging, field tilt maps and drizzle recommendations."
+    license: MIT
+    # Remove the macOS quarantine attribute so the CLI runs without Gatekeeper prompts
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/astro-analyzer"]
+          end

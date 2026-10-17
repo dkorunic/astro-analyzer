@@ -1,0 +1,6 @@
+# Build output
+/astro-analyzer
+/dist/
+
+# Local tool state
+/.remember/
