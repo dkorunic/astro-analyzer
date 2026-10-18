@@ -11,7 +11,8 @@ sums integration time per filter and night with the Moon and twilight
 conditions, maps how star shapes vary across the field to diagnose tilt,
 coma and tracking errors, and shows how much of a rotating stack keeps full
 depth. It also recommends PixInsight DrizzleIntegration settings
-(Scale and Drop shrink) from the measured sampling and dithering.
+(Scale and Drop shrink) from the measured sampling and dithering, and
+predicts what PixInsight's WBPP will decide for the session.
 
 Nothing is uploaded, converted or sent anywhere: frames are read, measured
 and reported locally. The measurement conventions follow PixInsight
@@ -102,10 +103,15 @@ background and sky gradient (with an arrow toward the brighter side, top =
 last FITS row), how much of the Moon is lit, the share of frames with the Moon
 up, its median distance from the target, and frames taken in twilight (Sun
 above −18°). Nights differ in seeing and moonlight, which a session median
-hides:
+hides. For colour cameras the equipment line shows the `BAYERPAT` CFA
+pattern. If the two green sites only agree when it is read from the top row
+instead of the first stored one, it says so and gives the pattern from the
+first stored row. PixInsight reads files without `ROWORDER` from the first
+stored row, so its CFA pattern Auto would be wrong there: set that pattern
+explicitly in WBPP or Debayer.
 
 ```
-Bubble Nebula · RASA6F2 152 mm f/2.2 · Origin678C-643c1983c23be8af7 · 1.23"/px, field 79′ × 45′
+Bubble Nebula · RASA6F2 152 mm f/2.2 · Origin678C-643c1983c23be8af7 · CFA GBRG · 1.23"/px, field 79′ × 45′
 
 Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 28 min unflagged, over 2 nights
   Night       Frames  Time         FWHM px  Background  Gradient  Moon lit  Moon up  Moon dist  Twilight
@@ -198,6 +204,66 @@ Drizzle: 1312 unflagged frames, dither measured from plate solutions: stars move
   pixel-to-pixel noise in the drizzled image understates the true noise.
 - After integrating, check PixInsight's weights image: it should look
   uniform apart from the edges and, for colour data, the CFA pattern.
+
+### WBPP recommendation
+
+After the drizzle advice, a `WBPP` section per filter predicts the choices
+PixInsight's WeightedBatchPreprocessing makes for the unflagged frames, so
+you can see them before a multi-hour run:
+
+- **Exposure tolerance**: WBPP integrates lights whose exposures differ by
+  more than 2 s as separate masters (`BPP-FrameGroup.js:1230`). Mixed
+  exposures print the tolerance that keeps them in one master.
+- **Fast integration**: at 150 frames or more WBPP switches to
+  FastIntegration (`BPP-FrameGroup.js:344`), which has no minimum weight,
+  rejection algorithm or local normalization.
+- **Autocrop**: WBPP crops each master to the largest rectangle whose low
+  rejection map is at most 0.25 (`BPP-Processing.js:250`). Registration
+  fills pixels outside a frame with 0, which are rejected low, so that is
+  the largest rectangle that 75% of the frames overlap, found from the plate
+  solutions. On a rotating alt-az stack it is often a third of the frame.
+- **Local normalization**: PixInsight calls it crucial when gradients change
+  over time. Each frame's sky gradient is carried onto the reference frame
+  through the plate solutions, since a light dome fixed to the horizon turns
+  with an alt-az field even on a steady night. If the gradients differ
+  between frames by more than the stack's noise (frame noise / √N), the
+  difference survives integration and LN should stay on; below that it can
+  be turned off to save time. Under fast integration WBPP skips LN
+  altogether, and the report says so.
+- **Weighting**: the stack SNR, as a share of the best any weighting can
+  give (inverse-variance weights, from each frame's PSF SNR), and an
+  approximate stack FWHM for each weighting WBPP offers on that path: PSF
+  Signal Weight (the default) and PSF SNR, or, under fast integration, none
+  (its default), Resolution and PSF SNR. Weighting that favours sharp
+  frames costs SNR, so when the methods disagree the report names the one
+  for depth and the one for detail. Under fast integration it recommends
+  turning weighting on when it gains more than one more frame would.
+- **Minimum weight**: WBPP drops frames whose weight is under 5% of the
+  best in the group (`BPP-Operations.js:1611`). With the default PSF Signal
+  Weight, the frames whose PSFSW falls that low are listed.
+- **Rejection**: Auto picks percentile clipping up to 6 frames, Winsorized
+  sigma clipping up to 14 and Generalized ESD above
+  (`BPP-FrameGroup.js:1411`), counted after the minimum-weight drops. This
+  is the rule since WBPP 3.1.1; earlier versions use Linear Fit Clipping
+  above 15 frames. WBPP's comment on the change: at its default thresholds
+  linear fit rejected 18.5× more good samples than GESD on a 183-frame set,
+  and its aggressiveness grows with the number of frames, while GESD's
+  significance level means the same at any count. WBPP no longer offers
+  sigma clipping or averaged sigma clipping; Robust Chauvenet Rejection
+  (15+ frames) is available but never picked automatically.
+
+```
+WBPP: 1312 unflagged frames
+  Integration     fast integration, which WBPP enables at 150+ frames: no minimum weight or rejection algorithm to set
+  Autocrop        keeps about 1687 × 1635 px, 33% of the reference frame (where 75%+ of frames overlap)
+  Normalization   gradients differ between frames by 53.8 ADU across the field (median), 7.7× the stack's noise;
+                  WBPP skips local normalization under fast integration: turn that off to apply it, or remove the gradient from the master
+  Weighting       none (default)  SNR  96.3% of best, stack FWHM ≈ 5.32 px
+                  Resolution      SNR  93.1%, ≈ 4.97 px
+                  PSF SNR         SNR 100.0%, ≈ 5.29 px
+  Recommendation  enable weighting: up to +3.9% SNR, worth 7.9% more exposure, at almost no cost
+                  PSF SNR for depth, Resolution for detail
+```
 
 ### Columns
 

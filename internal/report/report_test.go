@@ -6,6 +6,8 @@ package report
 import (
 	"bytes"
 	"math"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -169,5 +171,115 @@ func TestScoreAndBest(t *testing.T) {
 	Summary(&b, frames)
 	if !strings.Contains(b.String(), "Reference frame for registration: a.fits (best wFWHM 4.00 px, 1000 stars)") {
 		t.Errorf("summary:\n%s", b.String())
+	}
+}
+
+// TestWBPP: a frame under 5% of the best PSFSW is dropped, leaving 14 for
+// Winsorized sigma clipping; mixed exposures ask for a wider tolerance; an
+// unknown weight is not dropped; 150 frames switch to fast integration.
+func TestWBPP(t *testing.T) {
+	var frames []Frame
+	for i := range 16 {
+		r := analyze.Result{Exp: 60, PSFSW: 1}
+		switch i {
+		case 3:
+			r.PSFSW = 0.04
+		case 5:
+			r.PSFSW = math.NaN()
+		case 7:
+			r.Exp = 120
+		}
+		frames = append(frames, Frame{Path: "/s/f" + strconv.Itoa(i) + ".fits", Result: r})
+	}
+	frames[9].Flags = []string{"FWHM px"}
+	var b bytes.Buffer
+	WBPP(&b, frames)
+	for _, want := range []string{"15 unflagged", "tolerance to 60 s", "1 frames under 5%", ": f3.fits\n", "Winsorized sigma clipping for 14 frames"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, b.String())
+		}
+	}
+	b.Reset()
+	WBPP(&b, slices.Repeat(frames[:1], 150))
+	if s := b.String(); !strings.Contains(s, "fast integration") || strings.Contains(s, "Rejection") {
+		t.Errorf("150 frames:\n%s", s)
+	}
+}
+
+func TestMaxRect(t *testing.T) {
+	g := []bool{
+		true, true, false, false,
+		true, true, true, true,
+		true, true, true, true,
+	}
+	if w, h := maxRect(g, 4); w != 4 || h != 2 {
+		t.Errorf("maxRect = %d × %d, want 4 × 2", w, h)
+	}
+}
+
+// TestNormalization: on a field rotating 95°, a gradient fixed to the sky
+// (moonlight high above) registers onto itself and needs no local
+// normalization; one fixed to the sensor, as a light dome is on an alt-az
+// mount, turns across the stack and does.
+func TestNormalization(t *testing.T) {
+	const s, k = 1.0 / 3600, 0.5 // deg/px; ADU/px slope
+	ref := fits.WCS{CD: [2][2]float64{{-s, 0}, {0, s}}, CRVAL: [2]float64{10, 20}, CRPIX: [2]float64{100.5, 100.5}, NAXIS: [2]int{200, 200}, OK: true}
+	run := func(skyFixed bool) string {
+		var frames []Frame
+		for i := range 20 {
+			th := float64(5*i) * math.Pi / 180
+			c, sn := math.Cos(th), math.Sin(th)
+			wcs := ref
+			// ref.CD·Rot(θ): the sensor turned by θ on the sky.
+			wcs.CD = [2][2]float64{{-s * c, s * sn}, {s * sn, s * c}}
+			angle := 0.0
+			if skyFixed {
+				angle = -float64(5 * i) // the sky's +x seen from the turned sensor
+			}
+			a := angle * math.Pi / 180
+			r := analyze.Result{Gradient: k * 200 * (math.Abs(math.Cos(a)) + math.Abs(math.Sin(a))), GradAngle: angle, Noise: 1}
+			r.WCS, r.Size = wcs, [2]int{200, 200}
+			frames = append(frames, Frame{Result: r})
+		}
+		var b bytes.Buffer
+		normalization(&b, frames, false)
+
+		return b.String()
+	}
+	if got := run(true); !strings.Contains(got, "can be off") {
+		t.Errorf("sky-fixed gradient:\n%s", got)
+	}
+	if got := run(false); !strings.Contains(got, "keep local normalization on") {
+		t.Errorf("sensor-fixed gradient:\n%s", got)
+	}
+}
+
+// TestWeighting: when the sharp frames are the faint ones, PSF SNR wins on
+// depth and PSFSW on detail; identical frames make the choice moot; and
+// FastIntegration weighting is not worth enabling for identical frames.
+func TestWeighting(t *testing.T) {
+	var frames []Frame
+	for i := range 20 {
+		r := analyze.Result{PSFSNR: 4, FWHM: 5, PSFSW: 1, Noise: 1}
+		if i%2 == 0 {
+			r.PSFSNR, r.FWHM, r.PSFSW = 1, 3, 3 // sharp but faint
+		}
+		frames = append(frames, Frame{Result: r})
+	}
+	var b bytes.Buffer
+	weighting(&b, frames, false)
+	if !strings.Contains(b.String(), "PSF SNR for depth, PSF Signal Weight for detail") {
+		t.Errorf("mixed frames:\n%s", b.String())
+	}
+	same := slices.Repeat(frames[1:2], 20)
+	b.Reset()
+	weighting(&b, same, false)
+	if !strings.Contains(b.String(), "either will do") {
+		t.Errorf("identical frames:\n%s", b.String())
+	}
+	b.Reset()
+	weighting(&b, same, true)
+	if !strings.Contains(b.String(), "leave weighting off") {
+		t.Errorf("identical frames, fast integration:\n%s", b.String())
 	}
 }

@@ -41,7 +41,8 @@ func Overview(w io.Writer, frames []Frame) {
 	}
 }
 
-// equipment describes target, optics, camera, plate scale and field of view.
+// equipment describes target, optics, camera, CFA pattern, plate scale and
+// field of view.
 func equipment(m fits.Meta) string {
 	var parts []string
 	if m.Object != "" {
@@ -58,6 +59,13 @@ func equipment(m fits.Meta) string {
 	}
 	if m.Camera != "" {
 		parts = append(parts, m.Camera)
+	}
+	if m.Bayer != "" {
+		cfa := "CFA " + m.Bayer
+		if m.BayerFlip {
+			cfa += " read from the top row (" + m.Bayer[2:] + m.Bayer[:2] + " from the first stored row)"
+		}
+		parts = append(parts, cfa)
 	}
 	if m.Plate > 0 {
 		parts = append(parts, fmt.Sprintf("%.2f\"/px, field %.0f′ × %.0f′",
@@ -263,10 +271,37 @@ func Coverage(w io.Writer, frames []Frame) {
 // rotating about its target gives about the same answer.
 func coverage(ws []fits.WCS) (float64, float64, float64, float64) {
 	ref := ws[0]
+	counts, nx, ny := coverCounts(ws)
+	var full, most, half int
+	for _, n := range counts {
+		if n == len(ws) {
+			full++
+		}
+		if float64(n) >= 0.9*float64(len(ws)) {
+			most++
+		}
+		if 2*n >= len(ws) {
+			half++
+		}
+	}
+	lo, hi := 0.0, 0.0
+	for _, f := range ws {
+		d := math.Mod(f.Rotation()-ref.Rotation()+540, 360) - 180
+		lo, hi = min(lo, d), max(hi, d)
+	}
+	cells := float64(nx * ny)
+
+	return hi - lo, float64(full) / cells, float64(most) / cells, float64(half) / cells
+}
+
+// coverCounts is the number of frames that see each point of a grid over
+// the first frame, row-major from its first FITS row, nx = 64 points wide.
+func coverCounts(ws []fits.WCS) ([]int, int, int) {
+	ref := ws[0]
 	w, h := float64(ref.NAXIS[0]), float64(ref.NAXIS[1])
 	nx := 64
 	ny := max(1, int(math.Round(float64(nx)*h/w)))
-	var full, most, half int
+	counts := make([]int, 0, nx*ny)
 	for j := range ny {
 		for i := range nx {
 			// 1-based FITS pixel coordinates, pixel centres at integers.
@@ -278,23 +313,9 @@ func coverage(ws []fits.WCS) (float64, float64, float64, float64) {
 					n++
 				}
 			}
-			if n == len(ws) {
-				full++
-			}
-			if float64(n) >= 0.9*float64(len(ws)) {
-				most++
-			}
-			if 2*n >= len(ws) {
-				half++
-			}
+			counts = append(counts, n)
 		}
 	}
-	lo, hi := 0.0, 0.0
-	for _, f := range ws {
-		d := math.Mod(f.Rotation()-ref.Rotation()+540, 360) - 180
-		lo, hi = min(lo, d), max(hi, d)
-	}
-	cells := float64(nx * ny)
 
-	return hi - lo, float64(full) / cells, float64(most) / cells, float64(half) / cells
+	return counts, nx, ny
 }

@@ -169,6 +169,7 @@ func main() {
 		report.Field(os.Stdout, frames)
 		report.Coverage(os.Stdout, frames)
 		report.Drizzle(os.Stdout, frames)
+		report.WBPP(os.Stdout, frames)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -323,8 +323,9 @@ func TestOriginMeta(t *testing.T) {
 }
 
 // TestCFAColour: the Bayer pattern applies from the first stored row
-// unless its row mirror makes the two green sites agree far better, as on
-// Celestron Origin frames, whose GBRG describes an RGGB first row.
+// unless its row mirror makes the two green sites agree far better, which
+// Meta.BayerFlip reports. (Celestron Origin's GBRG reads as written: on real
+// frames its greens agree within 0.4%, read from the top 12–17% apart.)
 // XBAYROFF shifts it a column. Greens differ slightly, as real ones do.
 func TestCFAColour(t *testing.T) {
 	// RGGB in storage order: R 1000, G 2000 | G 2050, B 3000.
@@ -335,7 +336,7 @@ func TestCFAColour(t *testing.T) {
 		}
 	}
 	want := [3]float32{1000, 2025, 3000}
-	for _, cards := range [][]fitsio.Card{
+	for i, cards := range [][]fitsio.Card{
 		{{Name: "BAYERPAT", Value: "RGGB"}},
 		{{Name: "BAYERPAT", Value: "GBRG"}}, // the mirror: greens 2000 apart as written
 		{{Name: "BAYERPAT", Value: "RGGB"}, {Name: "ROWORDER", Value: "BOTTOM-UP"}},
@@ -359,6 +360,9 @@ func TestCFAColour(t *testing.T) {
 		}
 		if got != want {
 			t.Errorf("%v: R, G, B = %v, want %v", cards, got, want)
+		}
+		if m := img.Meta; m.Bayer != cards[0].Value || m.BayerFlip != (i == 1) {
+			t.Errorf("%v: Bayer %q, flip %v", cards, m.Bayer, m.BayerFlip)
 		}
 	}
 }

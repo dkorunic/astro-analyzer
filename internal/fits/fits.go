@@ -49,14 +49,19 @@ type Meta struct {
 	Time                      time.Time
 	Date, Filter              string
 	Object, Telescope, Camera string
-	WCS                       WCS // plate solution, for drizzle dither analysis
-	Exp, Temp, Alt            float64
-	Plate                     float64 // arcsec per original pixel, 0 if unknown
-	Aperture, FocalLen        float64 // mm
-	Lat, Lon                  float64 // site, degrees, east positive
-	RA, Dec                   float64 // target (frame centre), degrees
-	Size                      [2]int  // sensor pixels, before Bayer binning
-	CFA                       bool    // one-shot-colour (Bayer) sensor
+	// Bayer is BAYERPAT as written. BayerFlip is set when the data matches
+	// it read from the other end (the top row), not the first stored row:
+	// see cfaSamples.
+	Bayer              string
+	WCS                WCS    // plate solution, for drizzle dither analysis
+	Size               [2]int // sensor pixels, before Bayer binning
+	Exp, Temp, Alt     float64
+	Plate              float64 // arcsec per original pixel, 0 if unknown
+	Aperture, FocalLen float64 // mm
+	Lat, Lon           float64 // site, degrees, east positive
+	RA, Dec            float64 // target (frame centre), degrees
+	CFA                bool    // one-shot-colour (Bayer) sensor
+	BayerFlip          bool
 }
 
 // Load reads the first 2D/3D image HDU, applies BSCALE/BZERO, averages colour
@@ -106,8 +111,10 @@ func Load(path string) (Image, error) {
 		// Before binning: a clipped core averaged with unclipped neighbours no
 		// longer looks saturated. ponytail: RGB planes are averaged first, same dilution.
 		img.Sat = Saturation(img.Pix)
+		var flip bool
 		if planes == 1 && hdr.Get("BAYERPAT") != nil {
-			colour := cfaSamples(img.Pix, w, h, hdr)
+			var colour [3][]float32
+			colour, flip = cfaSamples(img.Pix, w, h, hdr)
 			img = Bin2(img)
 			img.Colour = colour
 		}
@@ -138,13 +145,15 @@ func Load(path string) (Image, error) {
 			FocalLen: first(hdr, "FOCALLEN"),
 			// ponytail: numeric degrees only; sexagesimal strings
 			// ("+45 49 38", MaxIm DL) read as unknown.
-			Lat:  first(hdr, "SITELAT", "LATITUDE", "OBSGEO-B"),
-			Lon:  first(hdr, "SITELONG", "LONGITUD", "OBSGEO-L"),
-			RA:   first(hdr, "CRVAL1", "RA"),
-			Dec:  first(hdr, "CRVAL2", "DEC"),
-			Size: [2]int{w, h},
-			WCS:  readWCS(hdr),
-			CFA:  planes == 1 && hdr.Get("BAYERPAT") != nil,
+			Lat:       first(hdr, "SITELAT", "LATITUDE", "OBSGEO-B"),
+			Lon:       first(hdr, "SITELONG", "LONGITUD", "OBSGEO-L"),
+			RA:        first(hdr, "CRVAL1", "RA"),
+			Dec:       first(hdr, "CRVAL2", "DEC"),
+			Size:      [2]int{w, h},
+			WCS:       readWCS(hdr),
+			CFA:       planes == 1 && hdr.Get("BAYERPAT") != nil,
+			Bayer:     strings.ToUpper(str(hdr, "BAYERPAT")),
+			BayerFlip: flip,
 		}
 		// XPIXSZ already includes binning per the FITS convention (MaxIm DL, N.I.N.A.).
 		px, _ := num(hdr, "XPIXSZ")
@@ -334,11 +343,12 @@ func blankBorder(pix []float32, w, h int) {
 // see the same sky, so the data decides: the pattern applies from the first
 // stored row, shifted by XBAYROFF/YBAYROFF, unless its row mirror (RGGB ↔
 // GBRG), which is what the other reading amounts to, makes the greens agree
-// at least twice as well. Read the wrong way, red and blue sample green.
-func cfaSamples(pix []float32, w, h int, hdr *fitsio.Header) [3][]float32 {
+// at least twice as well; flip reports that. Read the wrong way, red and
+// blue sample green.
+func cfaSamples(pix []float32, w, h int, hdr *fitsio.Header) ([3][]float32, bool) {
 	pat := strings.ToUpper(str(hdr, "BAYERPAT"))
 	if len(pat) != 4 || strings.Trim(pat, "RGB") != "" || strings.Count(pat, "G") != 2 {
-		return [3][]float32{}
+		return [3][]float32{}, false
 	}
 	xoff, _ := num(hdr, "XBAYROFF")
 	yoff, _ := num(hdr, "YBAYROFF")
@@ -356,6 +366,7 @@ func cfaSamples(pix []float32, w, h int, hdr *fitsio.Header) [3][]float32 {
 			}
 		}
 	}
+	flip := false
 	// greenGap is how far apart the two sites a pattern calls green are.
 	greenGap := func(p string) float32 {
 		var g []float32
@@ -368,7 +379,7 @@ func cfaSamples(pix []float32, w, h int, hdr *fitsio.Header) [3][]float32 {
 		return max(g[0]-g[1], g[1]-g[0])
 	}
 	if mirror := pat[2:] + pat[:2]; greenGap(mirror) < greenGap(pat)/2 {
-		pat = mirror
+		pat, flip = mirror, true
 	}
 	// R and B keep their site's slice; only green joins two.
 	var out [3][]float32
@@ -381,7 +392,7 @@ func cfaSamples(pix []float32, w, h int, hdr *fitsio.Header) [3][]float32 {
 		}
 	}
 
-	return out
+	return out, flip
 }
 
 // rough is the median of every 16th value: enough to compare sky levels.

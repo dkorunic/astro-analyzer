@@ -29,7 +29,7 @@ Dependencies only point downward in this list:
 | Package | Role |
 |---|---|
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
-| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), session summary + sparklines, field map, stack coverage, CSV/JSON |
+| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), session summary + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
 | `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
@@ -145,3 +145,8 @@ by the default run.
   (wFWHM, set by `report.Score`) sit beside per-frame `analyze.Result` values.
 - Zero pixels connected to the frame edge load as NaN: registration fills
   its border with 0. Interior zeros (calibration clipping) stay data.
+- WBPP's fast integration (auto at 150+ frames) skips local normalization,
+  the minimum-weight cut and the rejection algorithm
+  (`BPP-Pipeline.js:626,662`, `BPP-Operations.js:1578`). Gradient
+  comparisons for LN must be made on the reference frame's grid: an alt-az
+  light dome is fixed to the sensor and turns on the sky.

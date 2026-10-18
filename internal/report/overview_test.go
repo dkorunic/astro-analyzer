@@ -59,3 +59,14 @@ func TestCoverage(t *testing.T) {
 		t.Errorf("identical frames cover %.3f, want 1", full)
 	}
 }
+
+// TestEquipmentCFA: the Bayer pattern is shown as written, plus how it
+// reads from the first stored row when the data says it starts at the top.
+func TestEquipmentCFA(t *testing.T) {
+	if s := equipment(fits.Meta{Bayer: "GBRG"}); s != "CFA GBRG" {
+		t.Errorf("equipment = %q", s)
+	}
+	if s := equipment(fits.Meta{Bayer: "GBRG", BayerFlip: true}); !strings.Contains(s, "(RGGB from the first stored row)") {
+		t.Errorf("flipped equipment = %q", s)
+	}
+}
