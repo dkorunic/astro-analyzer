@@ -42,6 +42,7 @@ func main() {
 	gain := flag.Float64("gain", 0, "camera gain in e-/ADU (default: EGAIN header; unknown gain omits photon noise, as PixInsight does)")
 	k := flag.Float64("reject-sigma", 3, "flag frames deviating more than this many robust sigmas (MAD) from the session median")
 	minDev := flag.Float64("reject-min", 0.1, "...and by at least this fraction of the median (guards very stable sessions)")
+	readNoise := flag.Float64("read-noise", 0, "camera read noise in e- for the sub-length comparison (default: a preset for the camera at its GAIN)")
 	best := flag.Float64("best", 100, "also flag frames outside the best this percent per filter by wFWHM (Siril's -filter-wfwhm=N%)")
 	reject := flag.Bool("reject", false, "print only the paths of flagged frames, one per line")
 	csvOut := flag.Bool("csv", false, "write CSV instead of the table")
@@ -170,6 +171,7 @@ func main() {
 		report.Coverage(os.Stdout, frames)
 		report.Drizzle(os.Stdout, frames)
 		report.WBPP(os.Stdout, frames)
+		report.SubLength(os.Stdout, frames, *readNoise)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

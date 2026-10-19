@@ -73,6 +73,7 @@ measured so far.
 | `-psf` | `moffat4` | PSF model: `moffat4` (PixInsight's default), `moffat` (free β, ~8× slower) or `gaussian` |
 | `-sigma` | `5` | Star detection threshold, in noise sigmas above the local background |
 | `-gain` | from `EGAIN` | Camera gain in e⁻/ADU. Without it the photon-noise term is left out of SNR, as PixInsight does |
+| `-read-noise` | camera preset | Read noise in e⁻ for the sub-length comparison. Presets cover the Celestron Origin Mark II and ZWO cameras at their deep-sky gain (`GAIN` header) |
 | `-reject-sigma` | `3` | Flag a frame when it is worse than the session median by this many robust sigmas… |
 | `-reject-min` | `0.1` | …and by at least this fraction of the median, so stable sessions are not over-flagged |
 | `-best` | `100` | Also flag frames outside the best this percent per filter by wFWHM, as Siril's `stack -filter-wfwhm=N%` keeps them (e.g. `-best=90`) |
@@ -263,6 +264,38 @@ WBPP: 1312 unflagged frames
                   PSF SNR         SNR 100.0%, ≈ 5.29 px
   Recommendation  enable weighting: up to +3.9% SNR, worth 7.9% more exposure, at almost no cost
                   PSF SNR for depth, Resolution for detail
+```
+
+### Sub-length comparison
+
+Last, a `Sub length` section per filter asks whether shorter (or longer)
+subs would do better, for the same total time:
+
+- **Read noise** is paid once per sub, shot noise per second. Each raw
+  pixel's noise in electrons (same-colour neighbours two apart in a row,
+  differenced, so gradients and nebulae cancel) gives the shot-noise rate
+  B = (σ² − RN²)/t, and a sub of t seconds keeps √(B / (B + RN²/t)) of
+  the SNR. Read noise comes from `-read-noise` or a preset, which applies
+  only at the gain setting it was measured at. The Origin Mark II's preset,
+  1.1 e⁻, is an upper bound from its 9-frame bias master
+  (astro-recommender uses a vendor sheet's 2.15 e⁻). The rule of thumb is
+  that 5% is an acceptable cost (Robin Glover, 2019).
+- **Field rotation** of an alt-az mount turns the field during each sub,
+  smearing corner stars tangentially by r·ω·t. The rate ω comes from
+  consecutive plate solutions; equatorial mounts show none.
+
+```
+Sub length: 15 s subs
+  Noise           5.5 e⁻ per pixel, read noise 1.1 e⁻ (≤ Celestron Origin Mark II at ISO 1000, from its bias master)
+                  shot noise 2 e⁻/s (sky, target, dark): read noise costs ≤ 5% SNR from 6 s
+  Field rotation  0.0076°/s median, 0.0121°/s p90; corner stars smear tangentially (median FWHM 5.08 px)
+  Sub      SNR vs no read noise  Corner smear median / p90
+  5 s      94.3%                 1.5 / 2.3 px
+  10 s     97.0%                 2.9 / 4.7 px
+  15 s     98.0%                 4.4 / 7.0 px              ← now
+  20 s     98.5%                 5.9 / 9.4 px
+  30 s     99.0%                 8.8 / 14.1 px
+  60 s     99.5%                 17.6 / 28.2 px
 ```
 
 ### Columns

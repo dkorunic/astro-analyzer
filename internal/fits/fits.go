@@ -40,6 +40,9 @@ type Image struct {
 	// pixels to [0, 1], and its PSF residual is in those units.
 	Range float64
 	Gain  float64 // e-/ADU, 0 if unknown
+	// PixNoise is the noise of one raw pixel in ADU, measured before
+	// binning: see pixNoise.
+	PixNoise float64
 }
 
 // Meta is observing context from the FITS header; NaN/""/zero when absent.
@@ -56,6 +59,7 @@ type Meta struct {
 	WCS                WCS    // plate solution, for drizzle dither analysis
 	Size               [2]int // sensor pixels, before Bayer binning
 	Exp, Temp, Alt     float64
+	Setting            float64 // camera gain setting: GAIN, else ISOSPEED; NaN if absent
 	Plate              float64 // arcsec per original pixel, 0 if unknown
 	Aperture, FocalLen float64 // mm
 	Lat, Lon           float64 // site, degrees, east positive
@@ -120,6 +124,7 @@ func Load(path string) (Image, error) {
 		// Before binning: a clipped core averaged with unclipped neighbours no
 		// longer looks saturated. ponytail: RGB planes are averaged first, same dilution.
 		img.Sat = Saturation(img.Pix)
+		noise := pixNoise(img.Pix, w, h)
 		var flip bool
 		if planes == 1 && hdr.Get("BAYERPAT") != nil {
 			var colour [3][]float32
@@ -127,6 +132,7 @@ func Load(path string) (Image, error) {
 			img = Bin2(img)
 			img.Colour = colour
 		}
+		img.PixNoise = noise
 		g, _ := num(hdr, "EGAIN")
 		img.Gain = max(g, 0) / adu
 		img.Range = math.Exp2(float64(hdr.Bitpix())) - 1
@@ -147,6 +153,7 @@ func Load(path string) (Image, error) {
 			Telescope: str(hdr, "TELESCOP"),
 			Camera:    str(hdr, "INSTRUME", "CAMERA"),
 			Exp:       first(hdr, "EXPTIME", "EXPOSURE"),
+			Setting:   first(hdr, "GAIN", "ISOSPEED"),
 			Temp:      first(hdr, "CCD-TEMP"),
 			// Not ALTITUDE: that is the observing site's elevation in metres.
 			Alt:      first(hdr, "CENTALT", "OBJCTALT"),
@@ -192,6 +199,30 @@ func Load(path string) (Image, error) {
 	}
 
 	return Image{}, ErrNoImage
+}
+
+// pixNoise is the noise of one raw pixel in ADU: the robust σ (16th–84th
+// percentile span) of differences between pixels two apart in a row, which
+// share a CFA colour, over √2. Differencing cancels gradients, nebulae and
+// row banding; the percentiles ignore stars. Every 16th row and 3rd pixel
+// keep it cheap. NaN when too few pixels are valid.
+func pixNoise(pix []float32, w, h int) float64 {
+	var d []float64
+	for y := 0; y < h; y += 16 {
+		row := pix[y*w : (y+1)*w]
+		for x := 0; x+2 < w; x += 3 {
+			if v := float64(row[x] - row[x+2]); !math.IsNaN(v) {
+				d = append(d, v)
+			}
+		}
+	}
+	if len(d) < 100 {
+		return math.NaN()
+	}
+	slices.Sort(d)
+	n := len(d) - 1
+
+	return (d[n*841/1000] - d[n*159/1000]) / 2 / math.Sqrt2
 }
 
 // step is the ADU per ADC count when software scales the data up: the

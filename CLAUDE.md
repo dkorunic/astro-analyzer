@@ -29,7 +29,7 @@ Dependencies only point downward in this list:
 | Package | Role |
 |---|---|
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
-| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), session summary + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), CSV/JSON |
+| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), session summary + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and read-noise presets (`subs.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
 | `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
@@ -117,6 +117,10 @@ by the default run.
   Origin only: photon transfer on a real session confirmed it (0.0095 vs
   0.0112 e⁻/ADU). Its bias and dark files are 9-frame masters (`NSTACK`),
   saved as identical copies.
+- Per-pixel noise in electrons comes from raw same-colour neighbours
+  (`pixNoise`, before binning), not the binned MRS noise: on Origin frames
+  2×2 binning lowers the noise only 1.7×, not 2×, so neighbouring raw
+  pixels share noise and binned σ·2 would overstate it.
 - `img.Gain` is per raw pixel; after `Bin2` the effective gain is
   `Gain·Scale²`. Apply it where the binned flux is used, not in `Load`, so
   the `-gain` flag gets it too.

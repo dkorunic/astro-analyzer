@@ -32,6 +32,9 @@ type Result struct {
 	SNRW    float64
 	Bg, Std float64 // sigma-clipped sky median and stddev
 	Noise   float64 // wavelet (MRS) noise
+	// NoiseE is the noise of one raw pixel in electrons: read noise plus
+	// the shot noise of sky, target and dark current. NaN without a gain.
+	NoiseE float64
 	// Sky gradient: the fitted plane's range across the frame in ADU, and
 	// the direction it rises toward, degrees counter-clockwise from +x.
 	Gradient, GradAngle float64
@@ -57,6 +60,15 @@ type Result struct {
 type Cell struct {
 	FWHM, Ecc float64
 	Axis      [2]float64
+}
+
+// electrons converts raw ADU to electrons, NaN without a gain.
+func electrons(adu, gain float64) float64 {
+	if gain > 0 {
+		return adu * gain
+	}
+
+	return math.NaN()
 }
 
 // Frame analyses img, detecting stars at sigma times the noise above the
@@ -93,6 +105,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 		Meta: img.Meta, Bg: bg, Std: std, Noise: noise,
 		FWHM: nan, FWHMArc: nan, Ecc: nan, Resid: nan, SNR: nan, PSFSNR: nan, PSFSW: nan,
 		SNRW: snrw, Gradient: gradient, GradAngle: gradAngle,
+		NoiseE: electrons(img.PixNoise, img.Gain),
 	}
 	r.SunAlt, r.MoonAlt, r.MoonIllum, r.MoonSep = ephemeris(img.Meta)
 	r.Sky = skyColour(img.Colour)
