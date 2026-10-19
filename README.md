@@ -314,7 +314,9 @@ Unknown values print as `-`, are empty in CSV and are omitted keys in JSON.
 - **SNR** uses PixInsight's AperturePhotometry error model, with a local sky
   annulus: `SNR = flux / √(n·σ² + n²·σ²/n_sky + flux/gain)`. Gain is per raw
   pixel, so a 2×2 superpixel uses four times the gain. Float data normalised
-  to [0, 1] is no longer in ADU, so its `EGAIN` is ignored.
+  to [0, 1] is no longer in ADU, so its `EGAIN` is ignored. Celestron Origin
+  writes `EGAIN` per ADC count but stores each count as 25 ADU (every pixel
+  a multiple of 25), so its gain is divided by that step.
 - **PSF fitting**: stars with SNR ≥ 20 are fitted with an elliptical, rotated
   profile by Levenberg–Marquardt. The model is integrated over each pixel's
   area, so undersampled stars of ~2 px are measured correctly. FWHM is the

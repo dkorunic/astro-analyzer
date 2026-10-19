@@ -14,6 +14,34 @@ import (
 	"github.com/dkorunic/astro-analyzer/internal/synth"
 )
 
+// TestLoadOriginGain checks that Celestron Origin's EGAIN, per ADC count,
+// is divided by the 25 ADU each count is stored as; other software keeps it.
+func TestLoadOriginGain(t *testing.T) {
+	pix := synth.StarField(4, 4)
+	for i, v := range pix {
+		pix[i] = 25 * math.Round(v/25)
+	}
+	for _, c := range []struct {
+		creator string
+		want    float64
+	}{{"Origin 1.5.6240", 0.2793 / 25}, {"N.I.N.A.", 0.2793}} {
+		path := filepath.Join(t.TempDir(), "light.fits")
+		err := synth.WriteFITS(path, pix,
+			fitsio.Card{Name: "CREATOR", Value: c.creator},
+			fitsio.Card{Name: "EGAIN", Value: 0.2793})
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, err := fits.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if math.Abs(img.Gain-c.want) > 1e-12 {
+			t.Errorf("%s: gain %g, want %g", c.creator, img.Gain, c.want)
+		}
+	}
+}
+
 // TestLoad round-trips a 16-bit unsigned (BZERO=32768) frame and checks the
 // pixel scaling and header context.
 func TestLoad(t *testing.T) {

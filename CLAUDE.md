@@ -112,6 +112,11 @@ by the default run.
 - Celestron Origin (alt-az) frames rotate 100°+ per session (`CROTA2`); the
   first frame may have `ASTRSOLV = F` (mount pointing, not a plate solve).
   `readWCS` keeps its `CD` (plate scale) but sets `OK = false`.
+- Celestron Origin `EGAIN` is per ADC count, but stored pixels are counts
+  × 25 (ISO 1000). `Load` divides by the pixel values' GCD (`step`), on
+  Origin only: photon transfer on a real session confirmed it (0.0095 vs
+  0.0112 e⁻/ADU). Its bias and dark files are 9-frame masters (`NSTACK`),
+  saved as identical copies.
 - `img.Gain` is per raw pixel; after `Bin2` the effective gain is
   `Gain·Scale²`. Apply it where the binned flux is used, not in `Load`, so
   the `-gain` flag gets it too.

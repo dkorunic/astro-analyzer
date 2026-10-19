@@ -108,6 +108,15 @@ func Load(path string) (Image, error) {
 			return Image{}, err
 		}
 		blankBorder(img.Pix, w, h)
+		// Celestron Origin stores each ADC count as several ADU (25 at ISO
+		// 1000: every pixel a multiple of 25) but writes EGAIN per count.
+		// Photon transfer on a real session gives 0.0095 e-/ADU against
+		// EGAIN/25 = 0.0112. ponytail: only Origin is verified; other
+		// software scales 12-bit data by 16 and may write EGAIN either way.
+		adu := 1.0
+		if strings.HasPrefix(str(hdr, "CREATOR"), "Origin") && hdr.Bitpix() > 0 {
+			adu = float64(step(img.Pix))
+		}
 		// Before binning: a clipped core averaged with unclipped neighbours no
 		// longer looks saturated. ponytail: RGB planes are averaged first, same dilution.
 		img.Sat = Saturation(img.Pix)
@@ -119,7 +128,7 @@ func Load(path string) (Image, error) {
 			img.Colour = colour
 		}
 		g, _ := num(hdr, "EGAIN")
-		img.Gain = max(g, 0)
+		img.Gain = max(g, 0) / adu
 		img.Range = math.Exp2(float64(hdr.Bitpix())) - 1
 		// Float data normalised to [0, 1] (PixInsight) is no longer in ADU,
 		// so EGAIN no longer converts it to electrons.
@@ -183,6 +192,32 @@ func Load(path string) (Image, error) {
 	}
 
 	return Image{}, ErrNoImage
+}
+
+// step is the greatest common divisor of the integer pixel values: the ADU
+// per ADC count when software scales the data up. Blank (NaN) pixels are
+// skipped; 1 when nothing is scaled.
+func step(pix []float32) int {
+	g := 0
+	for _, v := range pix {
+		if v != v || v == 0 {
+			continue
+		}
+		g = gcd(g, int(math.Abs(float64(v))))
+		if g == 1 {
+			break
+		}
+	}
+
+	return max(g, 1)
+}
+
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+
+	return a
 }
 
 // readPixels decodes the image into pix, averaging its colour planes, and
