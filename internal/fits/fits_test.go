@@ -20,6 +20,9 @@ func TestLoadOriginGain(t *testing.T) {
 	pix := synth.StarField(4, 4)
 	for i, v := range pix {
 		pix[i] = 25 * math.Round(v/25)
+		if i%500 == 0 {
+			pix[i] += 10 // interpolated hot pixels break an exact GCD
+		}
 	}
 	for _, c := range []struct {
 		creator string

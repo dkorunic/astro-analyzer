@@ -113,7 +113,7 @@ by the default run.
   first frame may have `ASTRSOLV = F` (mount pointing, not a plate solve).
   `readWCS` keeps its `CD` (plate scale) but sets `OK = false`.
 - Celestron Origin `EGAIN` is per ADC count, but stored pixels are counts
-  × 25 (ISO 1000). `Load` divides by the pixel values' GCD (`step`), on
+  × 25 (ISO 1000). `Load` divides by the step 99% of pixel values share (`step`; an exact GCD gives 5), on
   Origin only: photon transfer on a real session confirmed it (0.0095 vs
   0.0112 e⁻/ADU). Its bias and dark files are 9-frame masters (`NSTACK`),
   saved as identical copies.

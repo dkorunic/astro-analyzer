@@ -194,30 +194,30 @@ func Load(path string) (Image, error) {
 	return Image{}, ErrNoImage
 }
 
-// step is the greatest common divisor of the integer pixel values: the ADU
-// per ADC count when software scales the data up. Blank (NaN) pixels are
-// skipped; 1 when nothing is scaled.
+// step is the ADU per ADC count when software scales the data up: the
+// largest k ≤ 64 that divides at least 99% of the valid pixels, as a few
+// are not multiples (Origin: 1 in 5000, interpolated hot pixels, which an
+// exact GCD turns 25 into 5). 1 when nothing is scaled.
 func step(pix []float32) int {
-	g := 0
-	for _, v := range pix {
-		if v != v || v == 0 {
-			continue
+	var v []int
+	for i := 0; i < len(pix) && len(v) < 20000; i += 97 {
+		if p := pix[i]; p == p && p != 0 {
+			v = append(v, int(math.Abs(float64(p))))
 		}
-		g = gcd(g, int(math.Abs(float64(v))))
-		if g == 1 {
-			break
+	}
+	for k := 64; k > 1; k-- {
+		n := 0
+		for _, x := range v {
+			if x%k == 0 {
+				n++
+			}
+		}
+		if len(v) > 0 && n >= len(v)*99/100 {
+			return k
 		}
 	}
 
-	return max(g, 1)
-}
-
-func gcd(a, b int) int {
-	for b != 0 {
-		a, b = b, a%b
-	}
-
-	return a
+	return 1
 }
 
 // readPixels decodes the image into pix, averaging its colour planes, and
