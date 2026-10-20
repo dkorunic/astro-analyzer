@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"codeberg.org/astrogo/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 // pattern is the fixtures' pixel at (x, y): see testdata/gen.py.

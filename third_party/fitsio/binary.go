@@ -25,6 +25,7 @@ func (r *rbuf) Read(p []byte) (int, error) {
 	}
 	n := copy(p, r.p[r.c:])
 	r.c += n
+
 	return n, nil
 }
 
@@ -43,29 +44,34 @@ func (r *rbuf) readBool(v *bool) {
 	}
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (r *rbuf) readI8(v *int8) {
 	*v = int8(r.p[r.c])
 	r.c++
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (r *rbuf) readI16(v *int16) {
 	beg := r.c
 	r.c += 2
 	*v = int16(binary.BigEndian.Uint16(r.p[beg:r.c]))
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (r *rbuf) readI32(v *int32) {
 	beg := r.c
 	r.c += 4
 	*v = int32(binary.BigEndian.Uint32(r.p[beg:r.c]))
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (r *rbuf) readI64(v *int64) {
 	beg := r.c
 	r.c += 8
 	*v = int64(binary.BigEndian.Uint64(r.p[beg:r.c]))
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (r *rbuf) readInt(v *int) {
 	beg := r.c
 	r.c += 8
@@ -173,12 +179,6 @@ func (r *rbuf) readInts(vs []int) {
 	}
 }
 
-func (r *rbuf) readU8s(vs []uint8) {
-	for i := range vs {
-		r.readU8(&vs[i])
-	}
-}
-
 func (r *rbuf) readU16s(vs []uint16) {
 	for i := range vs {
 		r.readU16(&vs[i])
@@ -242,16 +242,12 @@ func (w *wbuf) Write(data []byte) (int, error) {
 		return n, io.ErrShortWrite
 	}
 	w.c += n
+
 	return n, nil
 }
 
 func (w *wbuf) bytes() []byte {
 	return w.p
-}
-
-func (w *wbuf) writeByte(v byte) {
-	w.p[w.c] = v
-	w.c++
 }
 
 func (w *wbuf) writeBool(v bool) {
@@ -263,29 +259,34 @@ func (w *wbuf) writeBool(v bool) {
 	w.c++
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (w *wbuf) writeI8(v int8) {
 	w.p[w.c] = byte(v)
 	w.c++
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (w *wbuf) writeI16(v int16) {
 	beg := w.c
 	w.c += 2
 	binary.BigEndian.PutUint16(w.p[beg:w.c], uint16(v))
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (w *wbuf) writeI32(v int32) {
 	beg := w.c
 	w.c += 4
 	binary.BigEndian.PutUint32(w.p[beg:w.c], uint32(v))
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (w *wbuf) writeI64(v int64) {
 	beg := w.c
 	w.c += 8
 	binary.BigEndian.PutUint64(w.p[beg:w.c], uint64(v))
 }
 
+//nolint:gosec // FITS stores signed integers as two's complement: a reinterpretation, not an overflow
 func (w *wbuf) writeInt(v int) {
 	beg := w.c
 	w.c += 8
@@ -378,12 +379,6 @@ func (w *wbuf) writeI32s(vs []int32) {
 func (w *wbuf) writeI64s(vs []int64) {
 	for _, v := range vs {
 		w.writeI64(v)
-	}
-}
-
-func (w *wbuf) writeU8s(vs []uint8) {
-	for _, v := range vs {
-		w.writeU8(v)
 	}
 }
 

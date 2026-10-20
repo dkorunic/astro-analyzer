@@ -7,52 +7,56 @@ package fitsio
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
 )
 
-// Column represents a column in a FITS table
+// Column represents a column in a FITS table.
 type Column struct {
-	Name    string  // column name, corresponding to ``TTYPE`` keyword
-	Format  string  // column format, corresponding to ``TFORM`` keyword
-	Unit    string  // column unit, corresponding to ``TUNIT`` keyword
-	Null    string  // null value, corresponding to ``TNULL`` keyword
-	Bscale  float64 // bscale value, corresponding to ``TSCAL`` keyword
-	Bzero   float64 // bzero value, corresponding to ``TZERO`` keyword
-	Display string  // display format, corresponding to ``TDISP`` keyword
-	Dim     []int64 // column dimension corresponding to ``TDIM`` keyword
-	Start   int64   // column starting position, corresponding to ``TBCOL`` keyword
-
-	dtype  Type   // type of the value held by the column
-	offset int    // offset in bytes (from start of data-pad or heap-pad) to get at the column data
-	txtfmt string // go-based fmt string for ASCII table
-
 	// read function (binary/ascii)
 	read func(table *Table, icol int, irow int64, ptr interface{}) error
 
 	// write function (binary/ascii)
-	write func(table *Table, icol int, irow int64, ptr interface{}) error
+	write   func(table *Table, icol int, irow int64, ptr interface{}) error
+	Name    string // column name, corresponding to ``TTYPE`` keyword
+	Format  string // column format, corresponding to ``TFORM`` keyword
+	Unit    string // column unit, corresponding to ``TUNIT`` keyword
+	Null    string // null value, corresponding to ``TNULL`` keyword
+	Display string // display format, corresponding to ``TDISP`` keyword
+	txtfmt  string // go-based fmt string for ASCII table
+
+	Dim   []int64 // column dimension corresponding to ``TDIM`` keyword
+	dtype Type    // type of the value held by the column
+
+	Bscale float64 // bscale value, corresponding to ``TSCAL`` keyword
+	Bzero  float64 // bzero value, corresponding to ``TZERO`` keyword
+	Start  int64   // column starting position, corresponding to ``TBCOL`` keyword
+
+	offset int // offset in bytes (from start of data-pad or heap-pad) to get at the column data
 }
 
-// NewColumn creates a new Column with name `name` and Format inferred from the type of value
-func NewColumn(name string, v interface{}) (Column, error) {
-	panic("not implemented")
+// NewColumn creates a new Column with name `name` and Format inferred from the type of value.
+func NewColumn(_ string, _ interface{}) (Column, error) {
+	return Column{}, fmt.Errorf("%w: NewColumn is not implemented", ErrFITS)
 }
 
-// Type returns the Go reflect.Type associated with this Column
+// Type returns the Go reflect.Type associated with this Column.
 func (col *Column) Type() reflect.Type {
 	return col.dtype.gotype
 }
 
 // readBin reads the value at column number icol and row irow, into ptr.
-func (col *Column) readBin(table *Table, icol int, irow int64, ptr interface{}) error {
+//
+//nolint:gocyclo,maintidx // one branch per Go kind and FITS type
+func (col *Column) readBin(table *Table, _ int, irow int64, ptr interface{}) error {
 	var err error
 
 	rv := reflect.Indirect(reflect.ValueOf(ptr))
 	rt := reflect.TypeOf(rv.Interface())
 
-	switch rt.Kind() {
+	switch rt.Kind() { //nolint:exhaustive // the default case handles the other values
 	case reflect.Slice:
 
 		beg := table.rowsz*int(irow) + col.offset
@@ -84,7 +88,7 @@ func (col *Column) readBin(table *Table, icol int, irow int64, ptr interface{}) 
 		// A descriptor of a corrupt file may point anywhere: keep it within
 		// the heap before allocating or slicing. (astro-analyzer fork)
 		if size := int(col.dtype.gotype.Elem().Size()); nmax < 0 || beg < 0 || size > 0 && nmax > (len(table.heap)-beg)/size || beg > len(table.heap) {
-			return fmt.Errorf("fitsio: column %q row %d: descriptor (%d, %d) outside the %d-byte heap", col.Name, irow, nmax, beg, len(table.heap))
+			return fmt.Errorf("%w: column %q row %d: descriptor (%d, %d) outside the %d-byte heap", ErrFITS, col.Name, irow, nmax, beg, len(table.heap))
 		}
 		if slice.Len() < nmax {
 			slice = reflect.MakeSlice(rt, nmax, nmax)
@@ -138,7 +142,7 @@ func (col *Column) readBin(table *Table, icol int, irow int64, ptr interface{}) 
 			r.readC128s(slice[:nmax])
 
 		default:
-			panic(fmt.Errorf("fitsio: not implemented %T", slice))
+			panic(fmt.Errorf("%w: not implemented %T", ErrFITS, slice))
 		}
 		rv.Set(slice)
 
@@ -195,135 +199,57 @@ func (col *Column) readBin(table *Table, icol int, irow int64, ptr interface{}) 
 			r.readC128s(slice)
 
 		default:
-			panic(fmt.Errorf("fitsio: not implemented %T", slice))
+			panic(fmt.Errorf("%w: not implemented %T", ErrFITS, slice))
 		}
 
-	case reflect.Bool:
-
+	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int,
+		reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		// A type switch, not ptr.(*bool) per kind: a named type of that
+		// kind returns an error instead of panicking. (astro-analyzer fork)
 		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readBool(ptr.(*bool))
-
-	case reflect.Int8:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readI8(ptr.(*int8))
-
-	case reflect.Int16:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readI16(ptr.(*int16))
-
-	case reflect.Int32:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readI32(ptr.(*int32))
-
-	case reflect.Int64:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readI64(ptr.(*int64))
-
-	case reflect.Int:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readInt(ptr.(*int))
-
-	case reflect.Uint8:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readU8(ptr.(*uint8))
-
-	case reflect.Uint16:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readU16(ptr.(*uint16))
-
-	case reflect.Uint32:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readU32(ptr.(*uint32))
-
-	case reflect.Uint64:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readU64(ptr.(*uint64))
-
-	case reflect.Uint:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readUint(ptr.(*uint))
-
-	case reflect.Float32:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readF32(ptr.(*float32))
-
-	case reflect.Float64:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readF64(ptr.(*float64))
-
-	case reflect.Complex64:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readC64(ptr.(*complex64))
-
-	case reflect.Complex128:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		r := newReader(table.data[beg:end])
-		r.readC128(ptr.(*complex128))
+		r := newReader(table.data[beg : beg+col.dtype.dsize])
+		switch v := ptr.(type) {
+		case *bool:
+			r.readBool(v)
+		case *int8:
+			r.readI8(v)
+		case *int16:
+			r.readI16(v)
+		case *int32:
+			r.readI32(v)
+		case *int64:
+			r.readI64(v)
+		case *int:
+			r.readInt(v)
+		case *uint8:
+			r.readU8(v)
+		case *uint16:
+			r.readU16(v)
+		case *uint32:
+			r.readU32(v)
+		case *uint64:
+			r.readU64(v)
+		case *uint:
+			r.readUint(v)
+		case *float32:
+			r.readF32(v)
+		case *float64:
+			r.readF64(v)
+		case *complex64:
+			r.readC64(v)
+		case *complex128:
+			r.readC128(v)
+		default:
+			return fmt.Errorf("%w: binary-table can not read/write %T", ErrFITS, ptr)
+		}
 
 	case reflect.String:
 
 		beg := table.rowsz*int(irow) + col.offset
 		end := beg + col.dtype.dsize
 		row := table.data[beg:end]
-		str := ""
+		var str string
 		if row[0] == '\x00' {
 			str = string(row[1:])
 			str = strings.TrimRight(str, string([]byte("\x00")))
@@ -334,13 +260,16 @@ func (col *Column) readBin(table *Table, icol int, irow int64, ptr interface{}) 
 		rv.SetString(str)
 
 	default:
-		return fmt.Errorf("fitsio: binary-table can not read/write %v", rt.Kind())
+		return fmt.Errorf("%w: binary-table can not read/write %v", ErrFITS, rt.Kind())
 	}
+
 	return err
 }
 
 // writeBin writes the value at column number icol and row irow, from ptr.
-func (col *Column) writeBin(table *Table, icol int, irow int64, ptr interface{}) error {
+//
+//nolint:gocyclo,maintidx // one branch per Go kind and FITS type
+func (col *Column) writeBin(table *Table, _ int, irow int64, ptr interface{}) error {
 	var (
 		err error
 		rv  = reflect.Indirect(reflect.ValueOf(ptr))
@@ -348,7 +277,7 @@ func (col *Column) writeBin(table *Table, icol int, irow int64, ptr interface{})
 		rt  = reflect.TypeOf(rvi)
 	)
 
-	switch rt.Kind() {
+	switch rt.Kind() { //nolint:exhaustive // the default case handles the other values
 	case reflect.Slice:
 
 		beg := table.rowsz*int(irow) + col.offset
@@ -358,9 +287,12 @@ func (col *Column) writeBin(table *Table, icol int, irow int64, ptr interface{})
 		nmax := rv.Len()
 
 		switch col.dtype.dsize {
-		case 8:
-			w.writeI32(int32(nmax))
-			w.writeI32(int32(len(table.heap)))
+		case 8: // 1P descriptors are 32-bit (astro-analyzer fork)
+			if nmax > math.MaxInt32 || len(table.heap) > math.MaxInt32 {
+				return fmt.Errorf("%w: column %q: %d elements at heap offset %d overflow a 1P descriptor", ErrFITS, col.Name, nmax, len(table.heap))
+			}
+			w.writeI32(int32(nmax))            //nolint:gosec // bounded above
+			w.writeI32(int32(len(table.heap))) //nolint:gosec // bounded above
 
 		case 16:
 			w.writeI64(int64(nmax))
@@ -416,7 +348,7 @@ func (col *Column) writeBin(table *Table, icol int, irow int64, ptr interface{})
 				w.writeC128s(slice)
 
 			default:
-				panic(fmt.Errorf("fitsio: not implemented %T", slice))
+				panic(fmt.Errorf("%w: not implemented %T", ErrFITS, slice))
 			}
 			table.heap = append(table.heap, w.bytes()...)
 		}
@@ -474,128 +406,50 @@ func (col *Column) writeBin(table *Table, icol int, irow int64, ptr interface{})
 			w.writeC128s(slice)
 
 		default:
-			panic(fmt.Errorf("fitsio: not implemented %T", slice))
+			panic(fmt.Errorf("%w: not implemented %T", ErrFITS, slice))
 		}
 
-	case reflect.Bool:
-
+	case reflect.Bool, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int,
+		reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		// A type switch, not ptr.(*bool) per kind: a named type of that
+		// kind returns an error instead of panicking. (astro-analyzer fork)
 		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeBool(rvi.(bool))
-
-	case reflect.Int8:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeI8(rvi.(int8))
-
-	case reflect.Int16:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeI16(rvi.(int16))
-
-	case reflect.Int32:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeI32(rvi.(int32))
-
-	case reflect.Int64:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeI64(rvi.(int64))
-
-	case reflect.Int:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeInt(rvi.(int))
-
-	case reflect.Uint8:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeU8(rvi.(uint8))
-
-	case reflect.Uint16:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeU16(rvi.(uint16))
-
-	case reflect.Uint32:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeU32(rvi.(uint32))
-
-	case reflect.Uint64:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeU64(rvi.(uint64))
-
-	case reflect.Uint:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeUint(rvi.(uint))
-
-	case reflect.Float32:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeF32(rvi.(float32))
-
-	case reflect.Float64:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeF64(rvi.(float64))
-
-	case reflect.Complex64:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeC64(rvi.(complex64))
-
-	case reflect.Complex128:
-
-		beg := table.rowsz*int(irow) + col.offset
-		end := beg + col.dtype.dsize
-
-		w := newWriter(table.data[beg:end])
-		w.writeC128(rvi.(complex128))
+		w := newWriter(table.data[beg : beg+col.dtype.dsize])
+		switch v := rvi.(type) {
+		case bool:
+			w.writeBool(v)
+		case int8:
+			w.writeI8(v)
+		case int16:
+			w.writeI16(v)
+		case int32:
+			w.writeI32(v)
+		case int64:
+			w.writeI64(v)
+		case int:
+			w.writeInt(v)
+		case uint8:
+			w.writeU8(v)
+		case uint16:
+			w.writeU16(v)
+		case uint32:
+			w.writeU32(v)
+		case uint64:
+			w.writeU64(v)
+		case uint:
+			w.writeUint(v)
+		case float32:
+			w.writeF32(v)
+		case float64:
+			w.writeF64(v)
+		case complex64:
+			w.writeC64(v)
+		case complex128:
+			w.writeC128(v)
+		default:
+			return fmt.Errorf("%w: binary-table can not read/write %T", ErrFITS, rvi)
+		}
 
 	case reflect.String:
 
@@ -613,20 +467,19 @@ func (col *Column) writeBin(table *Table, icol int, irow int64, ptr interface{})
 			n = len(data)
 		}
 		_, err = buf.Write(data[:n])
-
 		if err != nil {
-			return fmt.Errorf("fitsio: %v\n", err)
+			return fmt.Errorf("%w: %w", ErrFITS, err)
 		}
 
 	default:
-		return fmt.Errorf("fitsio: binary-table can not read/write %v", rt.Kind())
+		return fmt.Errorf("%w: binary-table can not read/write %v", ErrFITS, rt.Kind())
 	}
 
 	return err
 }
 
 // readTxt reads the value at column number icol and row irow, into ptr.
-func (col *Column) readTxt(table *Table, icol int, irow int64, ptr interface{}) error {
+func (col *Column) readTxt(table *Table, _ int, irow int64, ptr interface{}) error {
 	var err error
 
 	rv := reflect.Indirect(reflect.ValueOf(ptr))
@@ -637,30 +490,30 @@ func (col *Column) readTxt(table *Table, icol int, irow int64, ptr interface{}) 
 	buf := table.data[beg:end]
 	str := strings.TrimSpace(string(buf))
 
-	switch rt.Kind() {
+	switch rt.Kind() { //nolint:exhaustive // the default case handles the other values
 	case reflect.Slice:
 
-		return fmt.Errorf("fitsio: ASCII-table can not read/write slices")
+		return fmt.Errorf("%w: ASCII-table can not read/write slices", ErrFITS)
 
 	case reflect.Array:
 
-		return fmt.Errorf("fitsio: ASCII-table can not read/write arrays")
+		return fmt.Errorf("%w: ASCII-table can not read/write arrays", ErrFITS)
 
 	case reflect.Bool:
 
-		return fmt.Errorf("fitsio: ASCII-table can not read/write booleans")
+		return fmt.Errorf("%w: ASCII-table can not read/write booleans", ErrFITS)
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		v, err := strconv.ParseUint(str, 10, 64)
 		if err != nil {
-			return fmt.Errorf("fitsio: error parsing %q into a uint: %v", str, err)
+			return fmt.Errorf("%w: error parsing %q into a uint: %w", ErrFITS, str, err)
 		}
 		rv.SetUint(v)
 
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		v, err := strconv.ParseInt(str, 10, 64)
 		if err != nil {
-			return fmt.Errorf("fitsio: error parsing %q into an int: %v", str, err)
+			return fmt.Errorf("%w: error parsing %q into an int: %w", ErrFITS, str, err)
 		}
 		rv.SetInt(v)
 
@@ -668,25 +521,26 @@ func (col *Column) readTxt(table *Table, icol int, irow int64, ptr interface{}) 
 
 		v, err := strconv.ParseFloat(str, 64)
 		if err != nil {
-			return fmt.Errorf("fitsio: error parsing %q into a float: %v", str, err)
+			return fmt.Errorf("%w: error parsing %q into a float: %w", ErrFITS, str, err)
 		}
 		rv.SetFloat(v)
 
 	case reflect.Complex64, reflect.Complex128:
 
-		return fmt.Errorf("fitsio: ASCII-table can not read/write complexes")
+		return fmt.Errorf("%w: ASCII-table can not read/write complexes", ErrFITS)
 
 	case reflect.String:
 		rv.SetString(str)
 
 	default:
-		return fmt.Errorf("fitsio: ASCII-table can not read/write %v", rt.Kind())
+		return fmt.Errorf("%w: ASCII-table can not read/write %v", ErrFITS, rt.Kind())
 	}
+
 	return err
 }
 
 // writeTxt writes the value at column number icol and row irow, from ptr.
-func (col *Column) writeTxt(table *Table, icol int, irow int64, ptr interface{}) error {
+func (col *Column) writeTxt(table *Table, _ int, irow int64, ptr interface{}) error {
 	var err error
 
 	beg := table.rowsz*int(irow) + col.offset
@@ -696,22 +550,22 @@ func (col *Column) writeTxt(table *Table, icol int, irow int64, ptr interface{})
 	rv := reflect.Indirect(reflect.ValueOf(ptr))
 	rt := reflect.TypeOf(rv.Interface())
 
-	switch rt.Kind() {
+	switch rt.Kind() { //nolint:exhaustive // the default case handles the other values
 	case reflect.Slice:
 
-		return fmt.Errorf("fitsio: ASCII-table can not read/write slices")
+		return fmt.Errorf("%w: ASCII-table can not read/write slices", ErrFITS)
 
 	case reflect.Array:
 
-		return fmt.Errorf("fitsio: ASCII-table can not read/write arrays")
+		return fmt.Errorf("%w: ASCII-table can not read/write arrays", ErrFITS)
 
 	case reflect.Bool:
 
-		return fmt.Errorf("fitsio: ASCII-table can not read/write booleans")
+		return fmt.Errorf("%w: ASCII-table can not read/write booleans", ErrFITS)
 
 	case reflect.Complex64, reflect.Complex128:
 
-		return fmt.Errorf("fitsio: ASCII-table can not read/write complexes")
+		return fmt.Errorf("%w: ASCII-table can not read/write complexes", ErrFITS)
 
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -719,20 +573,20 @@ func (col *Column) writeTxt(table *Table, icol int, irow int64, ptr interface{})
 		reflect.String:
 
 		str := fmt.Sprintf(col.txtfmt, rv.Interface())
-		n := 0
-		n, err = fmt.Fprintf(w, str)
+		var n int
+		n, err = fmt.Fprint(w, str) // not Fprintf: a cell may hold %. (astro-analyzer fork)
 		if err != nil {
-			return fmt.Errorf("fitsio: error writing '%#v': %v", rv.Interface(), err)
+			return fmt.Errorf("%w: error writing '%#v': %w", ErrFITS, rv.Interface(), err)
 		}
 		if n != len(w.p) {
 			return fmt.Errorf(
-				"fitsio: error writing '%#v'. expected %d bytes. wrote %d",
+				"%w: error writing '%#v'. expected %d bytes. wrote %d", ErrFITS,
 				rv.Interface(), len(w.p), n,
 			)
 		}
 
 	default:
-		return fmt.Errorf("fitsio: ASCII-table can not read/write %v", rt.Kind())
+		return fmt.Errorf("%w: ASCII-table can not read/write %v", ErrFITS, rt.Kind())
 	}
 
 	return err

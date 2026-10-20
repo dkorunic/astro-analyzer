@@ -7,7 +7,7 @@ import (
 	"math"
 	"strings"
 
-	"codeberg.org/astrogo/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 // WCS is a gnomonic (TAN) world coordinate system from a plate-solved

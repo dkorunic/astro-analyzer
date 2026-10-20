@@ -22,7 +22,7 @@ PixInsight's WBPP will decide for the session, compares sub lengths by
 read-noise cost and field-rotation smear, and turns the session into
 N.I.N.A. sequencer settings: focuser temperature compensation, autofocus
 triggers, dither cadence and re-centring on drift, with checks of the
-cooler, dew and cloud from the headers.
+cooler, dew, cloud and wind from the headers.
 
 Nothing is uploaded, converted or sent anywhere: frames are read, measured
 and reported locally. The measurement conventions follow PixInsight
@@ -571,8 +571,9 @@ width: for a true FWHM F it reads about √(F² + 0.46), +6% at 2 px, +2.5% at
 
 ## Limitations
 
-- fpack's `HCOMPRESS_1` and `PLIO_1`, float TIFF, and RAW formats dcraw
-  9.28 predates (Canon CR3) are not read.
+- Float TIFF, RAW formats dcraw 9.28 predates (Canon CR3), and XISF images
+  stored inline or embedded in the header instead of attached (PixInsight
+  attaches subframes) are not read.
 - A directory search also measures the calibrated or registered XISF subs
   WBPP leaves in its output folder, alongside the raw ones: point it at the
   raw frames, or delete WBPP's intermediate folders first.

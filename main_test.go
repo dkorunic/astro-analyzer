@@ -11,12 +11,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codeberg.org/astrogo/fitsio"
 	"github.com/dkorunic/astro-analyzer/internal/analyze"
 	"github.com/dkorunic/astro-analyzer/internal/fits"
 	"github.com/dkorunic/astro-analyzer/internal/psf"
 	"github.com/dkorunic/astro-analyzer/internal/report"
 	"github.com/dkorunic/astro-analyzer/internal/synth"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 // TestEndToEnd scans a directory, skipping non-FITS and calibration files,

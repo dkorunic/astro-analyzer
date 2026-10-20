@@ -1,4 +1,5 @@
-//+build ignore
+//go:build ignore
+// +build ignore
 
 package main
 
@@ -11,8 +12,8 @@ import (
 	"math"
 	"os"
 
-	"codeberg.org/astrogo/fitsio"
-	"codeberg.org/astrogo/fitsio/fltimg"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio/fltimg"
 )
 
 var (

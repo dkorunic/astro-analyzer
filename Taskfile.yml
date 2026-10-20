@@ -56,8 +56,8 @@ tasks:
     desc: Tidy modules and run gci, gofumpt and betteralign formatters
     cmds:
       - go mod tidy
-      - gci write main.go internal  # not third_party: forks stay diffable against upstream
-      - gofumpt -l -w main.go internal
+      - gci write .
+      - gofumpt -l -w .
       - go fix ./...
       - betteralign -apply ./...
 

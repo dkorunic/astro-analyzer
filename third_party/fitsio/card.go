@@ -4,9 +4,11 @@
 
 package fitsio
 
-type Value interface{}
+// Value is a card value: string, bool, int, float64, complex128 or
+// big.Int.
+type Value = any
 
-// Card is a record block in a Header
+// Card is a record block in a Header.
 type Card struct {
 	Name    string
 	Value   Value

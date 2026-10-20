@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codeberg.org/astrogo/fitsio"
 	"github.com/dkorunic/astro-analyzer/internal/analyze"
 	"github.com/dkorunic/astro-analyzer/internal/fits"
 	"github.com/dkorunic/astro-analyzer/internal/psf"
 	"github.com/dkorunic/astro-analyzer/internal/synth"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 // BenchmarkPipeline measures one realistic frame end to end: FITS decoding,

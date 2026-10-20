@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/astrogo/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 // Load errors. ErrNotLight marks bias, dark and flat frames, which callers

@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	"codeberg.org/astrogo/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 	"github.com/klauspost/compress/zlib"
 	"github.com/klauspost/compress/zstd"
 )
@@ -403,7 +403,7 @@ func header(cards []fitsio.Card, bitpix int, axes []int) *fitsio.Header {
 		}
 	}
 
-	return fitsio.NewHeader(keep, fitsio.IMAGE_HDU, bitpix, axes)
+	return fitsio.NewHeader(keep, fitsio.HDUImage, bitpix, axes)
 }
 
 // card turns a FITS keyword written as text (XISF FITSKeyword, a TIFF

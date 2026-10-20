@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"codeberg.org/astrogo/fitsio"
 	"github.com/dkorunic/astro-analyzer/internal/fits"
 	"github.com/dkorunic/astro-analyzer/internal/synth"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 // TestLoadOriginGain checks that Celestron Origin's EGAIN, per ADC count,

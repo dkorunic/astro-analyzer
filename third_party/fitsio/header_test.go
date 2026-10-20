@@ -5,8 +5,8 @@
 package fitsio
 
 import (
+	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/big"
 	"os"
@@ -26,19 +26,19 @@ func newBigInt(t *testing.T) big.Int {
 func TestHeaderRW(t *testing.T) {
 	curdir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.Chdir(curdir)
 
-	workdir, err := ioutil.TempDir("", "go-fitsio-test-")
+	workdir, err := os.MkdirTemp("", "go-fitsio-test-")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(workdir)
 
 	err = os.Chdir(workdir)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	table := struct {
@@ -159,7 +159,7 @@ func TestHeaderRW(t *testing.T) {
 
 			phdr := NewHeader(
 				table.cards,
-				IMAGE_HDU,
+				HDUImage,
 				table.bitpix,
 				table.axes,
 			)
@@ -198,7 +198,6 @@ func TestHeaderRW(t *testing.T) {
 			}
 			if card.Comment != "the primary hdu version" {
 				t.Fatalf("expected EXTVER.Comment==%q. got %q", "the primary hdu version", card.Comment)
-
 			}
 
 			for _, ref := range table.cards {
@@ -259,7 +258,7 @@ func TestHeaderRW(t *testing.T) {
 			defer r.Close()
 			f, err := Open(r)
 			if err != nil {
-				buf, _ := ioutil.ReadFile(fname)
+				buf, _ := os.ReadFile(fname)
 				t.Fatalf("error opening file [%v]: %v\nbuf=%s\n", fname, err, string(buf))
 			}
 			defer f.Close()
@@ -294,7 +293,6 @@ func TestHeaderRW(t *testing.T) {
 			}
 			if card.Comment != "the primary hdu version" {
 				t.Fatalf("expected EXTVER.Comment==%q. got %q", "the primary hdu version", card.Comment)
-
 			}
 
 			for _, ref := range table.cards {
@@ -482,7 +480,7 @@ func TestRWHeaderLine(t *testing.T) {
 		},
 	} {
 		card, err := parseHeaderLine(table.line)
-		if !reflect.DeepEqual(err, table.err) {
+		if !sameErr(err, table.err) {
 			t.Fatalf("expected error [%v]. got: %v", table.err, err)
 		}
 		if !reflect.DeepEqual(card, table.card) {
@@ -501,19 +499,19 @@ func TestRWHeaderLine(t *testing.T) {
 	}{
 		{
 			line: []byte("SIMPLE= T / FITS file"),
-			err:  fmt.Errorf("fitsio: invalid header line length"),
+			err:  fmt.Errorf("%w: invalid header line length", ErrFITS),
 		},
 		{
 			line: []byte("STRING  = 'foo                   / comment                                      "),
-			err:  fmt.Errorf(`fitsio: string ends prematurely ("'foo                   / comment                                      ")`),
+			err:  fmt.Errorf(`%w: string ends prematurely ("'foo                   / comment                                      ")`, ErrFITS),
 		},
 		{
 			line: []byte("STRING  = 'foo ''                / comment                                      "),
-			err:  fmt.Errorf(`fitsio: string ends prematurely ("'foo ''                / comment                                      ")`),
+			err:  fmt.Errorf(`%w: string ends prematurely ("'foo ''                / comment                                      ")`, ErrFITS),
 		},
 	} {
 		card, err := parseHeaderLine(table.line)
-		if !reflect.DeepEqual(err, table.err) {
+		if !sameErr(err, table.err) {
 			t.Fatalf("expected error [%v]. got: %v\ncard=%#v", table.err, err, card)
 		}
 		if card != nil {
@@ -629,7 +627,7 @@ func TestMakeHeaderLine(t *testing.T) {
 		},
 	} {
 		line, err := makeHeaderLine(table.card)
-		if !reflect.DeepEqual(err, table.err) {
+		if !sameErr(err, table.err) {
 			t.Fatalf("expected error [%v]. got: %v\nline=%q", table.err, err, string(line))
 		}
 		if !reflect.DeepEqual(line, table.line) {
@@ -658,4 +656,15 @@ func TestDuplicateCardKeys(t *testing.T) {
 	if !reflect.DeepEqual(c.Value, want) {
 		t.Fatalf("got %v for duplicate key. want %v (the first one)", c.Value, want)
 	}
+}
+
+// sameErr compares errors by message and by whether they wrap ErrFITS:
+// DeepEqual compared their types, and the fork's errors wrap a sentinel.
+// (astro-analyzer fork)
+func sameErr(a, b error) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+
+	return a.Error() == b.Error() && errors.Is(a, ErrFITS) == errors.Is(b, ErrFITS)
 }

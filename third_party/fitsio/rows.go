@@ -13,30 +13,30 @@ import (
 // Its cursors starts before the first row of the result set.
 // Use Next to advance through the rows:
 //
-//  rows, err := table.Read(0, -1)
-//  ...
-//  for rows.Next() {
-//      var id int
-//      var x float64
-//      err = rows.Scan(&id, &x)
-//      ...
-//  }
-//  err = rows.Err() // get any error encountered during iteration
-//  ...
-//
+//	rows, err := table.Read(0, -1)
+//	...
+//	for rows.Next() {
+//	    var id int
+//	    var x float64
+//	    err = rows.Scan(&id, &x)
+//	    ...
+//	}
+//	err = rows.Err() // get any error encountered during iteration
+//	...
 type Rows struct {
-	table  *Table
+	err error // last error
+
+	table *Table
+
+	// cache of type -> slice of (struct-field-index,col-index)
+	// used by scanStruct
+	icols  map[reflect.Type][][2]int
 	cols   []int // list of (active) column indices
 	i      int64 // number of rows iterated over
 	n      int64 // number of rows this iterator iters over
 	inc    int64 // number of rows to increment by at each iteration
 	cur    int64 // current row index
 	closed bool
-	err    error // last error
-
-	// cache of type -> slice of (struct-field-index,col-index)
-	// used by scanStruct
-	icols map[reflect.Type][][2]int
 }
 
 // Err returns the error, if any, that was encountered during iteration.
@@ -53,6 +53,7 @@ func (rows *Rows) Close() error {
 	}
 	rows.closed = true
 	rows.table = nil
+
 	return nil
 }
 
@@ -66,16 +67,22 @@ func (rows *Rows) Scan(args ...interface{}) error {
 
 	switch len(args) {
 	case 0:
-		return fmt.Errorf("fitsio: Rows.Scan needs at least one argument")
+		return fmt.Errorf("%w: Rows.Scan needs at least one argument", ErrFITS)
 
 	case 1:
 		// maybe special case: map? struct?
 		rt := reflect.TypeOf(args[0]).Elem()
-		switch rt.Kind() {
+		switch rt.Kind() { //nolint:exhaustive // the default case handles the other values
 		case reflect.Map:
-			return rows.scanMap(*args[0].(*map[string]interface{}))
+			m, ok := args[0].(*map[string]interface{})
+			if !ok {
+				return fmt.Errorf("%w: Rows.Scan needs a *map[string]interface{}, not %T", ErrFITS, args[0])
+			}
+
+			return rows.scanMap(*m)
 		case reflect.Struct:
 			err = rows.scanStruct(args[0])
+
 			return err
 		}
 	}
@@ -83,11 +90,28 @@ func (rows *Rows) Scan(args ...interface{}) error {
 	return rows.scan(args...)
 }
 
+// Next prepares the next result row for reading with the Scan method.
+// It returns true on success, false if there is no next result row.
+// Every call to Scan, even the first one, must be preceded by a call to Next.
+func (rows *Rows) Next() bool {
+	if rows.closed {
+		return false
+	}
+	next := rows.i < rows.n
+	rows.cur += rows.inc
+	rows.i += rows.inc
+	if !next {
+		rows.err = rows.Close()
+	}
+
+	return next
+}
+
 func (rows *Rows) scan(args ...interface{}) error {
 	var err error
 	if len(args) != len(rows.cols) {
 		return fmt.Errorf(
-			"fitsio.Rows.Scan: invalid number of arguments (got %d. expected %d)",
+			"%w: Rows.Scan: invalid number of arguments (got %d. expected %d)", ErrFITS,
 			len(args),
 			len(rows.cols),
 		)
@@ -98,12 +122,13 @@ func (rows *Rows) scan(args ...interface{}) error {
 			return err
 		}
 	}
+
 	return err
 }
 
 func (rows *Rows) scanMap(data map[string]interface{}) error {
 	var err error
-	icols := make([]int, 0, len(data))
+	var icols []int
 	switch len(data) {
 	case 0:
 		icols = make([]int, len(rows.cols))
@@ -111,12 +136,14 @@ func (rows *Rows) scanMap(data map[string]interface{}) error {
 			icols[i] = i
 		}
 	default:
+		named := make([]int, 0, len(data))
 		for k := range data {
 			icol := rows.table.Index(k)
 			if icol >= 0 {
-				icols = append(icols, icol)
+				named = append(named, icol)
 			}
 		}
+		icols = named
 	}
 
 	for _, icol := range icols {
@@ -128,6 +155,7 @@ func (rows *Rows) scanMap(data map[string]interface{}) error {
 		}
 		data[col.Name] = val.Elem().Interface()
 	}
+
 	return err
 }
 
@@ -138,7 +166,7 @@ func (rows *Rows) scanStruct(data interface{}) error {
 	rv := reflect.ValueOf(data).Elem()
 	if _, ok := rows.icols[rt]; !ok {
 		icols := make([][2]int, 0, rt.NumField())
-		for i := 0; i < rt.NumField(); i++ {
+		for i := range rt.NumField() {
 			f := rt.Field(i)
 			n := f.Tag.Get("fits")
 			if n == "" {
@@ -160,21 +188,6 @@ func (rows *Rows) scanStruct(data interface{}) error {
 			return err
 		}
 	}
-	return err
-}
 
-// Next prepares the next result row for reading with the Scan method.
-// It returns true on success, false if there is no next result row.
-// Every call to Scan, even the first one, must be preceded by a call to Next.
-func (rows *Rows) Next() bool {
-	if rows.closed {
-		return false
-	}
-	next := rows.i < rows.n
-	rows.cur += rows.inc
-	rows.i += rows.inc
-	if !next {
-		rows.err = rows.Close()
-	}
-	return next
+	return err
 }

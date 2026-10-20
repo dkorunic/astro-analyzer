@@ -8,32 +8,32 @@ import (
 	"fmt"
 )
 
-// HDUType is the type of a Header-Data Unit
+// HDUType is the type of a Header-Data Unit.
 type HDUType int
 
 const (
-	IMAGE_HDU  HDUType = iota // Primary Array or IMAGE HDU
-	ASCII_TBL                 // ASCII table HDU
-	BINARY_TBL                // Binary table HDU
-	ANY_HDU                   // matches any HDU type
+	HDUImage       HDUType = iota // Primary Array or IMAGE HDU
+	HDUASCIITable                 // ASCII table HDU
+	HDUBinaryTable                // Binary table HDU
+	HDUAny                        // matches any HDU type
 )
 
 func (htype HDUType) String() string {
 	switch htype {
-	case IMAGE_HDU:
+	case HDUImage:
 		return "IMAGE"
-	case ASCII_TBL:
+	case HDUASCIITable:
 		return "TABLE"
-	case BINARY_TBL:
-		return "BINTABLE"
-	case ANY_HDU:
+	case HDUBinaryTable:
+		return xtBintable
+	case HDUAny:
 		return "ANY_HDU"
 	default:
-		panic(fmt.Errorf("invalid HDU Type value (%v)", int(htype)))
+		panic(fmt.Errorf("%w: invalid HDU Type value (%v)", ErrFITS, int(htype)))
 	}
 }
 
-// HDU is a "Header-Data Unit" block
+// HDU is a "Header-Data Unit" block.
 type HDU interface {
 	Close() error
 	Type() HDUType
@@ -44,9 +44,9 @@ type HDU interface {
 
 // CopyHDU copies the i-th HDU from the src FITS file into the dst one.
 func CopyHDU(dst, src *File, i int) error {
-	// FIXME(sbinet)
-	// use a more efficient implementation. directly copying raw-bytes
-	// instead of decoding/re-encoding them.
+	// The HDU is decoded and re-encoded; copying its raw bytes would be
+	// faster.
 	hdu := src.HDU(i)
+
 	return dst.Write(hdu)
 }

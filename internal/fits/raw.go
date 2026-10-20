@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/astrogo/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 // ErrRaw marks a camera RAW file dcraw could not read, or no dcraw.

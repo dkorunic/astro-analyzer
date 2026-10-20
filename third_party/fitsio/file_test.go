@@ -5,7 +5,6 @@
 package fitsio
 
 import (
-	"io/ioutil"
 	"os"
 	"testing"
 )
@@ -41,7 +40,6 @@ func TestOpenFile(t *testing.T) {
 	// if furl != "file://" {
 	// 	t.Fatalf("expected file-url [%v]. got [%v]", "file://", furl)
 	// }
-
 }
 
 func TestAsciiTbl(t *testing.T) {
@@ -68,12 +66,12 @@ func TestAsciiTbl(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error hdu-type: %v", err)
 	}
-	if hdutype != IMAGE_HDU {
-		t.Fatalf("expected hdu type [%v]. got [%v]", IMAGE_HDU, hdutype)
+	if hdutype != HDUImage {
+		t.Fatalf("expected hdu type [%v]. got [%v]", HDUImage, hdutype)
 	}
 
 	txt := hdu.Header().Text()
-	txt_ref, err := ioutil.ReadFile("testdata/ref.file001.hdu")
+	txt_ref, err := os.ReadFile("testdata/ref.file001.hdu")
 	if err != nil {
 		t.Fatalf("error reading ref file: %v", err)
 	}
@@ -87,8 +85,8 @@ func TestAsciiTbl(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error hdu-type: %v", err)
 	}
-	if hdutype != ASCII_TBL {
-		t.Fatalf("expected hdu type [%v]. got [%v]", ASCII_TBL, hdutype)
+	if hdutype != HDUASCIITable {
+		t.Fatalf("expected hdu type [%v]. got [%v]", HDUASCIITable, hdutype)
 	}
 
 	// test hdu by name
@@ -121,12 +119,12 @@ func TestBinTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error hdu-type: %v", err)
 	}
-	if hdutype != IMAGE_HDU {
-		t.Fatalf("expected hdu type [%v]. got [%v]", IMAGE_HDU, hdutype)
+	if hdutype != HDUImage {
+		t.Fatalf("expected hdu type [%v]. got [%v]", HDUImage, hdutype)
 	}
 
 	txt := hdu.Header().Text()
-	txt_ref, err := ioutil.ReadFile("testdata/ref.swp06542llg.hdu")
+	txt_ref, err := os.ReadFile("testdata/ref.swp06542llg.hdu")
 	if err != nil {
 		t.Fatalf("error reading ref file: %v", err)
 	}
@@ -140,8 +138,8 @@ func TestBinTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error hdu-type: %v", err)
 	}
-	if hdutype != BINARY_TBL {
-		t.Fatalf("expected hdu type [%v]. got [%v]", BINARY_TBL, hdutype)
+	if hdutype != HDUBinaryTable {
+		t.Fatalf("expected hdu type [%v]. got [%v]", HDUBinaryTable, hdutype)
 	}
 
 	// get hdu by name
@@ -151,10 +149,9 @@ func TestBinTable(t *testing.T) {
 	}
 
 	hdu = f.Get("IUE MELO")
-	if hdu.Type() != BINARY_TBL {
+	if hdu.Type() != HDUBinaryTable {
 		t.Fatalf("expected hdu 'IUE MELO' to be a bintable. got [%v]", hdu.Type())
 	}
-
 }
 
 func TestOpen(t *testing.T) {
@@ -189,19 +186,19 @@ func TestOpen(t *testing.T) {
 func TestCreateFile(t *testing.T) {
 	curdir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.Chdir(curdir)
 
-	workdir, err := ioutil.TempDir("", "go-fitsio-test-")
+	workdir, err := os.MkdirTemp("", "go-fitsio-test-")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(workdir)
 
 	err = os.Chdir(workdir)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	fname := "new.fits"

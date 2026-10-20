@@ -11,8 +11,8 @@ import (
 	"math/rand/v2"
 	"os"
 
-	"codeberg.org/astrogo/fitsio"
 	"github.com/dkorunic/astro-analyzer/internal/fits"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 // Field geometry: NStars stars on a W×H frame with background Bg and

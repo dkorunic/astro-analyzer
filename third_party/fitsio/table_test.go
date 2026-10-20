@@ -6,7 +6,6 @@ package fitsio
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"sort"
@@ -401,7 +400,7 @@ func TestTableScanMap(t *testing.T) {
 					}
 					for _, k := range refkeys {
 						refval := ref[k]
-						//dataval := reflect.ValueOf(data[k]).Elem().Interface()
+						// dataval := reflect.ValueOf(data[k]).Elem().Interface()
 						dataval := data[k]
 						if !reflect.DeepEqual(dataval, refval) {
 							t.Fatalf("rows.Scan (key=%s):\nexpected=%v\ngot=%v", k, refval, dataval)
@@ -493,22 +492,21 @@ func TestTableScanStruct(t *testing.T) {
 }
 
 func TestTableBuiltinsRW(t *testing.T) {
-
 	curdir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.Chdir(curdir)
 
-	workdir, err := ioutil.TempDir("", "go-fitsio-test-")
+	workdir, err := os.MkdirTemp("", "go-fitsio-test-")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(workdir)
 
 	err = os.Chdir(workdir)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	for ii, table := range []struct {
@@ -525,7 +523,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []int8{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -540,7 +538,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []int16{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -555,7 +553,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []int32{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -570,7 +568,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []int64{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -585,7 +583,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []int{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -600,7 +598,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []uint8{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -615,7 +613,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []uint16{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -630,7 +628,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []uint32{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -645,7 +643,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []uint64{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -660,7 +658,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I4",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []uint{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -675,7 +673,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "E26.17",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []float32{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -690,7 +688,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "E26.17",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []float64{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -705,7 +703,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "A80",
 				},
 			},
-			htype: ASCII_TBL,
+			htype: HDUASCIITable,
 			table: []string{
 				"10", "11", "12", "13",
 				"14", "15", "16", "17",
@@ -721,7 +719,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "L",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []bool{
 				true, true, true, true,
 				false, false, false, false,
@@ -737,7 +735,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "B",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []int8{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -752,7 +750,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []int16{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -767,7 +765,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "J",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []int32{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -782,7 +780,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "K",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []int64{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -797,7 +795,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "K",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []int{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -812,7 +810,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "B",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []uint8{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -827,7 +825,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "I",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []uint16{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -842,7 +840,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "J",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []uint32{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -857,7 +855,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "K",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []uint64{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -872,7 +870,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "K",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []uint{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -887,7 +885,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "E",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []float32{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -902,7 +900,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "D",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []float64{
 				10, 11, 12, 13,
 				14, 15, 16, 17,
@@ -917,7 +915,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "C",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []complex64{
 				complex(float32(10), float32(10)), complex(float32(11), float32(11)),
 				complex(float32(12), float32(12)), complex(float32(13), float32(13)),
@@ -935,7 +933,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "M",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []complex128{
 				complex(10, 10), complex(11, 11), complex(12, 12), complex(13, 13),
 				complex(14, 14), complex(15, 15), complex(16, 16), complex(17, 17),
@@ -950,7 +948,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "10A",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []string{
 				"10", "11", "12", "13",
 				"14", "15", "16", "17",
@@ -965,7 +963,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					Format: "2D",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][2]float64{
 				{10, 11},
 				{12, 13},
@@ -1036,7 +1034,7 @@ func TestTableBuiltinsRW(t *testing.T) {
 					defer r.Close()
 					f, err := Open(r)
 					if err != nil {
-						b, _ := ioutil.ReadFile(fname)
+						b, _ := os.ReadFile(fname)
 						t.Fatalf("error opening file [%v]: %v\n%q", fname, err, string(b))
 					}
 					defer f.Close()
@@ -1085,22 +1083,21 @@ func TestTableBuiltinsRW(t *testing.T) {
 }
 
 func TestTableSliceRW(t *testing.T) {
-
 	curdir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.Chdir(curdir)
 
-	workdir, err := ioutil.TempDir("", "go-fitsio-test-")
+	workdir, err := os.MkdirTemp("", "go-fitsio-test-")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(workdir)
 
 	err = os.Chdir(workdir)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	for ii, table := range []struct {
@@ -1118,7 +1115,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QL",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]bool{
 				{true, true, true, true},
 				{false, false, false, false},
@@ -1134,7 +1131,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QB",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]int8{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1149,7 +1146,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QI",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]int16{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1164,7 +1161,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QJ",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]int32{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1179,7 +1176,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QK",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]int64{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1194,7 +1191,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QK",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]int{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1209,7 +1206,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QB",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]uint8{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1224,7 +1221,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QI",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]uint16{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1239,7 +1236,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QJ",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]uint32{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1254,7 +1251,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QK",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]uint64{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1269,7 +1266,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QK",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]uint{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1284,7 +1281,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QE",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]float32{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1299,7 +1296,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QD",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]float64{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1314,14 +1311,20 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QC",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]complex64{
-				{complex(float32(10), float32(10)), complex(float32(11), float32(11)),
-					complex(float32(12), float32(12)), complex(float32(13), float32(13))},
-				{complex(float32(14), float32(14)), complex(float32(15), float32(15)),
-					complex(float32(16), float32(16)), complex(float32(17), float32(17))},
-				{complex(float32(18), float32(18)), complex(float32(19), float32(19)),
-					complex(float32(10), float32(10)), complex(float32(11), float32(11))},
+				{
+					complex(float32(10), float32(10)), complex(float32(11), float32(11)),
+					complex(float32(12), float32(12)), complex(float32(13), float32(13)),
+				},
+				{
+					complex(float32(14), float32(14)), complex(float32(15), float32(15)),
+					complex(float32(16), float32(16)), complex(float32(17), float32(17)),
+				},
+				{
+					complex(float32(18), float32(18)), complex(float32(19), float32(19)),
+					complex(float32(10), float32(10)), complex(float32(11), float32(11)),
+				},
 			},
 		},
 		{
@@ -1332,7 +1335,7 @@ func TestTableSliceRW(t *testing.T) {
 					Format: "QM",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][]complex128{
 				{complex(10, 10), complex(11, 11), complex(12, 12), complex(13, 13)},
 				{complex(14, 14), complex(15, 15), complex(16, 16), complex(17, 17)},
@@ -1402,7 +1405,7 @@ func TestTableSliceRW(t *testing.T) {
 					defer r.Close()
 					f, err := Open(r)
 					if err != nil {
-						b, _ := ioutil.ReadFile(fname)
+						b, _ := os.ReadFile(fname)
 						t.Fatalf("error opening file [%v]: %v\n%q", fname, err, string(b))
 					}
 					defer f.Close()
@@ -1451,22 +1454,21 @@ func TestTableSliceRW(t *testing.T) {
 }
 
 func TestTableArrayRW(t *testing.T) {
-
 	curdir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.Chdir(curdir)
 
-	workdir, err := ioutil.TempDir("", "go-fitsio-test-")
+	workdir, err := os.MkdirTemp("", "go-fitsio-test-")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(workdir)
 
 	err = os.Chdir(workdir)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	for ii, table := range []struct {
@@ -1484,7 +1486,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4L",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]bool{
 				{true, true, true, true},
 				{false, false, false, false},
@@ -1500,7 +1502,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4B",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]int8{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1515,7 +1517,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4I",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]int16{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1530,7 +1532,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4J",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]int32{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1545,7 +1547,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4K",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]int64{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1560,7 +1562,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4K",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]int{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1575,7 +1577,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4B",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]uint8{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1590,7 +1592,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4I",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]uint16{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1605,7 +1607,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4J",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]uint32{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1620,7 +1622,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4K",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]uint64{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1635,7 +1637,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4K",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]uint{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1650,7 +1652,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4E",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]float32{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1665,7 +1667,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4D",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]float64{
 				{10, 11, 12, 13},
 				{14, 15, 16, 17},
@@ -1680,14 +1682,20 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4C",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]complex64{
-				{complex(float32(10), float32(10)), complex(float32(11), float32(11)),
-					complex(float32(12), float32(12)), complex(float32(13), float32(13))},
-				{complex(float32(14), float32(14)), complex(float32(15), float32(15)),
-					complex(float32(16), float32(16)), complex(float32(17), float32(17))},
-				{complex(float32(18), float32(18)), complex(float32(19), float32(19)),
-					complex(float32(10), float32(10)), complex(float32(11), float32(11))},
+				{
+					complex(float32(10), float32(10)), complex(float32(11), float32(11)),
+					complex(float32(12), float32(12)), complex(float32(13), float32(13)),
+				},
+				{
+					complex(float32(14), float32(14)), complex(float32(15), float32(15)),
+					complex(float32(16), float32(16)), complex(float32(17), float32(17)),
+				},
+				{
+					complex(float32(18), float32(18)), complex(float32(19), float32(19)),
+					complex(float32(10), float32(10)), complex(float32(11), float32(11)),
+				},
 			},
 		},
 		{
@@ -1698,7 +1706,7 @@ func TestTableArrayRW(t *testing.T) {
 					Format: "4M",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: [][4]complex128{
 				{complex(10, 10), complex(11, 11), complex(12, 12), complex(13, 13)},
 				{complex(14, 14), complex(15, 15), complex(16, 16), complex(17, 17)},
@@ -1819,22 +1827,21 @@ func TestTableArrayRW(t *testing.T) {
 }
 
 func TestTableStructsRW(t *testing.T) {
-
 	curdir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.Chdir(curdir)
 
-	workdir, err := ioutil.TempDir("", "go-fitsio-test-")
+	workdir, err := os.MkdirTemp("", "go-fitsio-test-")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(workdir)
 
 	err = os.Chdir(workdir)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	type DataStruct struct {
@@ -1879,7 +1886,7 @@ func TestTableStructsRW(t *testing.T) {
 					Format: "4D",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []DataStruct{
 				{A: 10, B: 10, C: []int64{10, 10}, D: []float64{10, 10}, E: [2]float64{10, 10}},
 				{A: 11, B: 11, C: []int64{11, 11}, D: []float64{11, 11}, E: [2]float64{11, 11}},
@@ -1998,22 +2005,21 @@ func TestTableStructsRW(t *testing.T) {
 }
 
 func TestTableMapsRW(t *testing.T) {
-
 	curdir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.Chdir(curdir)
 
-	workdir, err := ioutil.TempDir("", "go-fitsio-test-")
+	workdir, err := os.MkdirTemp("", "go-fitsio-test-")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(workdir)
 
 	err = os.Chdir(workdir)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	for ii, table := range []struct {
@@ -2046,7 +2052,7 @@ func TestTableMapsRW(t *testing.T) {
 					Format: "2D",
 				},
 			},
-			htype: BINARY_TBL,
+			htype: HDUBinaryTable,
 			table: []map[string]interface{}{
 				{
 					"A": int64(10),
@@ -2202,14 +2208,14 @@ func benchTableWriteF64s(b *testing.B, n int) {
 	var (
 		data  = make([]float64, n)
 		cols  = []Column{{Name: "col", Format: "QD"}}
-		htype = BINARY_TBL
+		htype = HDUBinaryTable
 	)
 
 	for i := range data {
 		data[i] = float64(i)
 	}
 
-	w, err := ioutil.TempFile("", "go-fitsio-test-")
+	w, err := os.CreateTemp("", "go-fitsio-test-")
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -2253,14 +2259,14 @@ func benchTableWriteF64(b *testing.B, n int) {
 	var (
 		data  = make([]float64, n)
 		cols  = []Column{{Name: "col", Format: "D"}}
-		htype = BINARY_TBL
+		htype = HDUBinaryTable
 	)
 
 	for i := range data {
 		data[i] = float64(i)
 	}
 
-	w, err := ioutil.TempFile("", "go-fitsio-test-")
+	w, err := os.CreateTemp("", "go-fitsio-test-")
 	if err != nil {
 		b.Fatal(err)
 	}

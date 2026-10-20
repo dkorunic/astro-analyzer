@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"codeberg.org/astrogo/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 	"golang.org/x/image/tiff"
 )
 

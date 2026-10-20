@@ -15,7 +15,7 @@ import (
 	"slices"
 	"strings"
 
-	"codeberg.org/astrogo/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 	"github.com/klauspost/compress/gzip"
 )
 
@@ -130,7 +130,7 @@ func openTiled(tbl *fitsio.Table, fileSize int64) (source, error) {
 		}
 		cards = append(cards, *c)
 	}
-	hdr := fitsio.NewHeader(cards, fitsio.IMAGE_HDU, t.bitpix, t.axes)
+	hdr := fitsio.NewHeader(cards, fitsio.HDUImage, t.bitpix, t.axes)
 
 	return source{hdr: hdr, read: func() ([]float32, int, error) { return t.read(hdr) }}, nil
 }

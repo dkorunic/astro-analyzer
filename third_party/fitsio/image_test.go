@@ -10,31 +10,30 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	"io/ioutil"
 	"math"
 	"os"
 	"reflect"
 	"testing"
 
-	"codeberg.org/astrogo/fitsio/fltimg"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio/fltimg"
 )
 
 func TestImageRW(t *testing.T) {
 	curdir, err := os.Getwd()
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.Chdir(curdir)
 
-	workdir, err := ioutil.TempDir("", "go-fitsio-test-")
+	workdir, err := os.MkdirTemp("", "go-fitsio-test-")
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(workdir)
 
 	err = os.Chdir(workdir)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err)
 	}
 
 	for ii, tc := range []struct {
@@ -291,7 +290,7 @@ func TestImageRW(t *testing.T) {
 					switch i {
 
 					case 0: // create
-						//fmt.Printf("========= create [%s]....\n", fname)
+						// fmt.Printf("========= create [%s]....\n", fname)
 						w, err = os.Create(fname)
 						if err != nil {
 							t.Fatalf("error creating new file [%v]: %v", fname, err)
@@ -324,7 +323,7 @@ func TestImageRW(t *testing.T) {
 						}
 
 					case 1: // read
-						//fmt.Printf("========= read [%s]....\n", fname)
+						// fmt.Printf("========= read [%s]....\n", fname)
 						r, err = os.Open(fname)
 						if err != nil {
 							t.Fatalf("error opening file [%v]: %v", fname, err)
@@ -389,7 +388,6 @@ func TestImageRW(t *testing.T) {
 					}
 					if card.Comment != "the primary hdu version" {
 						t.Fatalf("expected EXTVER.Comment==%q. got %q", "the primary hdu version", card.Comment)
-
 					}
 
 					for _, ref := range tc.cards {
@@ -503,9 +501,7 @@ func TestImageImage(t *testing.T) {
 		w = 20
 		h = 20
 	)
-	var (
-		rect = image.Rect(0, 0, w, h)
-	)
+	rect := image.Rect(0, 0, w, h)
 	set := func(img draw.Image) {
 		img.Set(0, 0, color.RGBA{255, 0, 0, 255})
 		img.Set(10, 10, color.RGBA{0, 255, 0, 255})
@@ -791,7 +787,7 @@ func benchImageRead(b *testing.B, bitpix int, n int) {
 }
 
 func genImage(b *testing.B, bitpix int, n int) string {
-	w, err := ioutil.TempFile("", "go-test-fitsio-")
+	w, err := os.CreateTemp("", "go-test-fitsio-")
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -908,7 +904,7 @@ func BenchmarkImageWriteF64_10000(b *testing.B)  { benchImageWrite(b, -64, 10000
 func BenchmarkImageWriteF64_100000(b *testing.B) { benchImageWrite(b, -64, 100000) }
 
 func benchImageWrite(b *testing.B, bitpix int, n int) {
-	w, err := ioutil.TempFile("", "go-test-fitsio-")
+	w, err := os.CreateTemp("", "go-test-fitsio-")
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -972,7 +968,7 @@ func benchImageWrite(b *testing.B, bitpix int, n int) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	var img *imageHDU
+	var img *ImageHDU
 	for i := 0; i < b.N; i++ {
 		img = NewImage(bitpix, axes)
 		err = img.Write(ptr)

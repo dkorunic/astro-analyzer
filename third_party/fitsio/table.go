@@ -11,134 +11,32 @@ import (
 )
 
 type Table struct {
-	hdr    Header
-	binary bool
+	colidx map[string]int // associates a column name to its index
 
 	data []byte // main data table
 	heap []byte // heap data table (for variable length arrays)
 
+	cols []Column
+
+	hdr Header
+
 	rowsz  int   // size of each row in bytes (ie: NAXIS1)
 	nrows  int64 // number of rows (ie: NAXIS2)
-	cols   []Column
-	colidx map[string]int // associates a column name to its index
+	binary bool
 }
 
-// Close closes this HDU, cleaning up cycles (if any) for garbage collection
-func (t *Table) Close() error {
-	return nil
-}
-
-// Header returns the Header part of this HDU block.
-func (t *Table) Header() *Header {
-	return &t.hdr
-}
-
-// Type returns the Type of this HDU
-func (t *Table) Type() HDUType {
-	return t.hdr.Type()
-}
-
-// Name returns the value of the 'EXTNAME' Card.
-func (t *Table) Name() string {
-	card := t.hdr.Get("EXTNAME")
-	if card == nil {
-		return ""
-	}
-	return card.Value.(string)
-}
-
-// Version returns the value of the 'EXTVER' Card (or 1 if none)
-func (t *Table) Version() int {
-	card := t.hdr.Get("EXTVER")
-	if card == nil {
-		return 1
-	}
-	return card.Value.(int)
-}
-
-// Data returns the image payload
-func (t *Table) Data() (Value, error) {
-	panic("not implemented")
-}
-
-func (t *Table) NumRows() int64 {
-	return t.nrows
-}
-
-func (t *Table) NumCols() int {
-	return len(t.cols)
-}
-
-func (t *Table) Cols() []Column {
-	return t.cols
-}
-
-func (t *Table) Col(i int) *Column {
-	return &t.cols[i]
-}
-
-// Index returns the index of the first column with name `n` or -1
-func (t *Table) Index(n string) int {
-	idx, ok := t.colidx[n]
-	if !ok {
-		return -1
-	}
-	return idx
-}
-
-// ReadRange reads rows over the range [beg, end) and returns the corresponding iterator.
-// if end > maxrows, the iteration will stop at maxrows
-// ReadRange has the same semantics than a `for i=0; i < max; i+=inc {...}` loop
-func (t *Table) ReadRange(beg, end, inc int64) (*Rows, error) {
-	var err error
-	var rows *Rows
-
-	maxrows := t.NumRows()
-	if end > maxrows {
-		end = maxrows
-	}
-
-	if beg < 0 {
-		beg = 0
-	}
-
-	cols := make([]int, len(t.cols))
-	for i := range t.cols {
-		cols[i] = i
-	}
-
-	rows = &Rows{
-		table: t,
-		cols:  cols,
-		i:     beg,
-		n:     end,
-		inc:   inc,
-		cur:   beg - inc,
-		err:   nil,
-		icols: make(map[reflect.Type][][2]int),
-	}
-	return rows, err
-}
-
-// Read reads rows over the range [beg, end) and returns the corresponding iterator.
-// if end > maxrows, the iteration will stop at maxrows
-// ReadRange has the same semantics than a `for i=0; i < max; i++ {...}` loop
-func (t *Table) Read(beg, end int64) (*Rows, error) {
-	return t.ReadRange(beg, end, 1)
-}
-
-// NewTable creates a new table in the given FITS file
+// NewTable creates a new table in the given FITS file.
 func NewTable(name string, cols []Column, hdutype HDUType) (*Table, error) {
 	var err error
 
-	isbinary := true
-	switch hdutype {
-	case ASCII_TBL:
+	var isbinary bool
+	switch hdutype { //nolint:exhaustive // the default case handles the other values
+	case HDUASCIITable:
 		isbinary = false
-	case BINARY_TBL:
+	case HDUBinaryTable:
 		isbinary = true
 	default:
-		return nil, fmt.Errorf("fitsio: invalid HDUType (%v)", hdutype)
+		return nil, fmt.Errorf("%w: invalid HDUType (%v)", ErrFITS, hdutype)
 	}
 
 	ncols := len(cols)
@@ -169,21 +67,21 @@ func NewTable(name string, cols []Column, hdutype HDUType) (*Table, error) {
 	for i := range ncols {
 		col := &table.cols[i]
 		col.offset = offset
-		switch hdutype {
-		case BINARY_TBL:
+		switch hdutype { //nolint:exhaustive // the default case handles the other values
+		case HDUBinaryTable:
 			col.write = col.writeBin
 			col.read = col.readBin
-		case ASCII_TBL:
+		case HDUASCIITable:
 			col.write = col.writeTxt
 			col.read = col.readTxt
 		default:
-			return nil, fmt.Errorf("fitsio: invalid HDUType (%v)", hdutype)
+			return nil, fmt.Errorf("%w: invalid HDUType (%v)", ErrFITS, hdutype)
 		}
 
 		table.colidx[col.Name] = i
 
 		if col.Format == "" {
-			return nil, fmt.Errorf("fitsio: column (col=%s) has NO valid format", col.Name)
+			return nil, fmt.Errorf("%w: column (col=%s) has NO valid format", ErrFITS, col.Name)
 		}
 
 		cards = append(cards,
@@ -208,7 +106,7 @@ func NewTable(name string, cols []Column, hdutype HDUType) (*Table, error) {
 		col.txtfmt = txtfmtFromForm(col.Format)
 
 		if offset == 0 && i > 0 {
-			return nil, fmt.Errorf("fitsio: invalid data-layout")
+			return nil, fmt.Errorf("%w: invalid data-layout", ErrFITS)
 		}
 
 		if col.Unit != "" {
@@ -277,7 +175,7 @@ func NewTable(name string, cols []Column, hdutype HDUType) (*Table, error) {
 			var str strings.Builder
 			str.WriteString("(")
 			for idim, dim := range col.Dim {
-				str.WriteString(fmt.Sprintf("%d", dim))
+				fmt.Fprintf(&str, "%d", dim)
 				if idim+1 < len(col.Dim) {
 					str.WriteString(",")
 				}
@@ -290,7 +188,6 @@ func NewTable(name string, cols []Column, hdutype HDUType) (*Table, error) {
 				},
 			)
 		}
-
 	}
 
 	cards = append(
@@ -310,12 +207,12 @@ func NewTable(name string, cols []Column, hdutype HDUType) (*Table, error) {
 	return table, err
 }
 
-// NewTableFrom creates a new table in the given FITS file, using the struct v as schema
+// NewTableFrom creates a new table in the given FITS file, using the struct v as schema.
 func NewTableFrom(name string, v Value, hdutype HDUType) (*Table, error) {
 	rv := reflect.Indirect(reflect.ValueOf(v))
 	rt := rv.Type()
 	if rt.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("fitsio: NewTableFrom takes a struct value. got: %T", v)
+		return nil, fmt.Errorf("%w: NewTableFrom takes a struct value. got: %T", ErrFITS, v)
 	}
 	nmax := rt.NumField()
 	cols := make([]Column, 0, nmax)
@@ -328,7 +225,7 @@ func NewTableFrom(name string, v Value, hdutype HDUType) (*Table, error) {
 		field := rv.Field(i)
 		form := formFromGoType(field.Type(), hdutype)
 		if form == "" {
-			return nil, fmt.Errorf("fitsio: no FITS TFORM for field [%d] %#v", i, field.Interface())
+			return nil, fmt.Errorf("%w: no FITS TFORM for field [%d] %#v", ErrFITS, i, field.Interface())
 		}
 		cols = append(cols,
 			Column{
@@ -337,7 +234,122 @@ func NewTableFrom(name string, v Value, hdutype HDUType) (*Table, error) {
 			},
 		)
 	}
+
 	return NewTable(name, cols, hdutype)
+}
+
+// Close closes this HDU, cleaning up cycles (if any) for garbage collection.
+func (t *Table) Close() error {
+	return nil
+}
+
+// Header returns the Header part of this HDU block.
+func (t *Table) Header() *Header {
+	return &t.hdr
+}
+
+// Type returns the Type of this HDU.
+func (t *Table) Type() HDUType {
+	return t.hdr.Type()
+}
+
+// Name returns the value of the 'EXTNAME' Card.
+func (t *Table) Name() string {
+	card := t.hdr.Get("EXTNAME")
+	if card == nil {
+		return ""
+	}
+	name, _ := card.Value.(string)
+
+	return name
+}
+
+// Version returns the value of the 'EXTVER' Card (or 1 if none).
+func (t *Table) Version() int {
+	card := t.hdr.Get("EXTVER")
+	if card == nil {
+		return 1
+	}
+	if v, ok := card.Value.(int); ok {
+		return v
+	}
+
+	return 1
+}
+
+// Data returns the image payload.
+//
+//nolint:ireturn // HDUs differ in type: the interface is the API
+func (t *Table) Data() (Value, error) {
+	panic("not implemented")
+}
+
+func (t *Table) NumRows() int64 {
+	return t.nrows
+}
+
+func (t *Table) NumCols() int {
+	return len(t.cols)
+}
+
+func (t *Table) Cols() []Column {
+	return t.cols
+}
+
+func (t *Table) Col(i int) *Column {
+	return &t.cols[i]
+}
+
+// Index returns the index of the first column with name `n` or -1.
+func (t *Table) Index(n string) int {
+	idx, ok := t.colidx[n]
+	if !ok {
+		return -1
+	}
+
+	return idx
+}
+
+// ReadRange reads rows over the range [beg, end) and returns the corresponding iterator.
+// if end > maxrows, the iteration will stop at maxrows
+// ReadRange has the same semantics than a `for i=0; i < max; i+=inc {...}` loop.
+func (t *Table) ReadRange(beg, end, inc int64) (*Rows, error) {
+	var err error
+	var rows *Rows
+
+	maxrows := t.NumRows()
+	if end > maxrows {
+		end = maxrows
+	}
+
+	if beg < 0 {
+		beg = 0
+	}
+
+	cols := make([]int, len(t.cols))
+	for i := range t.cols {
+		cols[i] = i
+	}
+
+	rows = &Rows{
+		table: t,
+		cols:  cols,
+		i:     beg,
+		n:     end,
+		inc:   inc,
+		cur:   beg - inc,
+		err:   nil,
+		icols: make(map[reflect.Type][][2]int),
+	}
+
+	return rows, err
+}
+
+// Read reads rows over the range [beg, end) and returns the corresponding iterator.
+// if end > maxrows, the iteration will stop at maxrows
+// ReadRange has the same semantics than a `for i=0; i < max; i++ {...}` loop.
+func (t *Table) Read(beg, end int64) (*Rows, error) {
+	return t.ReadRange(beg, end, 1)
 }
 
 // Write writes the data into the columns at the current row.
@@ -348,14 +360,18 @@ func (t *Table) Write(args ...interface{}) error {
 
 	switch len(args) {
 	case 0:
-		return fmt.Errorf("fitsio: Rows.Scan needs at least one argument")
+		return fmt.Errorf("%w: Rows.Scan needs at least one argument", ErrFITS)
 
 	case 1:
 		// maybe special case: map? struct?
 		rt := reflect.TypeOf(args[0]).Elem()
-		switch rt.Kind() {
+		switch rt.Kind() { //nolint:exhaustive // the default case handles the other values
 		case reflect.Map:
-			err = t.writeMap(*args[0].(*map[string]interface{}))
+			m, ok := args[0].(*map[string]interface{})
+			if !ok {
+				return fmt.Errorf("%w: Table.Write needs a *map[string]interface{}, not %T", ErrFITS, args[0])
+			}
+			err = t.writeMap(*m)
 		case reflect.Struct:
 			err = t.writeStruct(args[0])
 		default:
@@ -369,8 +385,9 @@ func (t *Table) Write(args ...interface{}) error {
 		return err
 	}
 
-	t.nrows += 1
-	t.hdr.axes[1] += 1
+	t.nrows++
+	t.hdr.axes[1]++
+
 	return err
 }
 
@@ -378,14 +395,14 @@ func (t *Table) write(args ...interface{}) error {
 	var err error
 	if len(args) != len(t.cols) {
 		return fmt.Errorf(
-			"fitsio.Table.Write: invalid number of arguments (got %d. expected %d)",
+			"%w: Table.Write: invalid number of arguments (got %d. expected %d)", ErrFITS,
 			len(args),
 			len(t.cols),
 		)
 	}
 
-	for i := range t.cols {
-		err = t.cols[i].write(t, i, t.nrows, args[i])
+	for i, arg := range args { // len(args) == len(t.cols), checked above
+		err = t.cols[i].write(t, i, t.nrows, arg)
 		if err != nil {
 			return err
 		}
@@ -396,7 +413,7 @@ func (t *Table) write(args ...interface{}) error {
 
 func (t *Table) writeMap(data map[string]interface{}) error {
 	var err error
-	icols := make([]int, 0, len(data))
+	var icols []int
 	switch len(data) {
 	case 0:
 		icols = make([]int, len(t.cols))
@@ -404,12 +421,14 @@ func (t *Table) writeMap(data map[string]interface{}) error {
 			icols[i] = i
 		}
 	default:
+		named := make([]int, 0, len(data))
 		for k := range data {
 			icol := t.Index(k)
 			if icol >= 0 {
-				icols = append(icols, icol)
+				named = append(named, icol)
 			}
 		}
+		icols = named
 	}
 
 	for _, icol := range icols {
@@ -421,6 +440,7 @@ func (t *Table) writeMap(data map[string]interface{}) error {
 		}
 		data[col.Name] = val.Elem().Interface()
 	}
+
 	return err
 }
 
@@ -430,17 +450,15 @@ func (t *Table) writeStruct(data interface{}) error {
 	rv := reflect.ValueOf(data).Elem()
 	icols := make([][2]int, 0, rt.NumField())
 
-	if true { // fixme: devise a cache ?
-		for i := 0; i < rt.NumField(); i++ {
-			f := rt.Field(i)
-			n := f.Tag.Get("fits")
-			if n == "" {
-				n = f.Name
-			}
-			icol := t.Index(n)
-			if icol >= 0 {
-				icols = append(icols, [2]int{i, icol})
-			}
+	for i := range rt.NumField() { // looked up per row: a cache would help
+		f := rt.Field(i)
+		n := f.Tag.Get("fits")
+		if n == "" {
+			n = f.Name
+		}
+		icol := t.Index(n)
+		if icol >= 0 {
+			icols = append(icols, [2]int{i, icol})
 		}
 	}
 
@@ -453,6 +471,7 @@ func (t *Table) writeStruct(data interface{}) error {
 			return err
 		}
 	}
+
 	return err
 }
 
@@ -462,28 +481,26 @@ func (t *Table) freeze() error {
 	nrows := t.nrows
 	t.hdr.axes[1] = int(nrows)
 
-	if card := t.Header().Get("XTENSION"); card == nil {
-		hduext := ""
+	if card := t.Header().Get(kwXtension); card == nil {
+		hduext := "TABLE   "
 		if t.binary {
-			hduext = "BINTABLE"
-		} else {
-			hduext = "TABLE   "
+			hduext = xtBintable
 		}
 		cards := []Card{
 			{
-				Name:    "XTENSION",
+				Name:    kwXtension,
 				Value:   hduext,
 				Comment: "table extension",
 			},
 			{
-				Name:    "BITPIX",
+				Name:    kwBitpix,
 				Value:   t.Header().Bitpix(),
-				Comment: "number of bits per data pixel",
+				Comment: cmBitpix,
 			},
 			{
-				Name:    "NAXIS",
+				Name:    kwNaxis,
 				Value:   len(t.Header().Axes()),
-				Comment: "number of data axes",
+				Comment: cmNaxis,
 			},
 			{
 				Name:    "NAXIS1",
@@ -531,32 +548,28 @@ func CopyTable(dst, src *Table) error {
 	return CopyTableRange(dst, src, 0, src.NumRows())
 }
 
-// CopyTableRange copies the rows interval [beg,end) from src into dst
+// CopyTableRange copies the rows interval [beg,end) from src into dst.
 func CopyTableRange(dst, src *Table, beg, end int64) error {
 	var err error
 	if dst == nil {
-		return fmt.Errorf("fitsio: dst pointer is nil")
+		return fmt.Errorf("%w: dst pointer is nil", ErrFITS)
 	}
 	if src == nil {
-		return fmt.Errorf("fitsio: src pointer is nil")
+		return fmt.Errorf("%w: src pointer is nil", ErrFITS)
 	}
 
 	vla := false
 	for _, col := range src.Cols() {
 		if col.dtype.tc < 0 {
 			vla = true
+
 			break
 		}
 	}
 
-	// FIXME(sbinet)
-	// need to also handle VLAs
-	// src.heap -> dst.heap
-	// convert offsets into dst.heap
-	//
-	// for the time being: go the slow way
+	// Rows with variable-length arrays are copied the slow way: their
+	// offsets would need converting from src.heap into dst.heap.
 	switch vla {
-
 	case true:
 		rows, err := src.Read(beg, end)
 		if err != nil {

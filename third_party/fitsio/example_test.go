@@ -9,7 +9,7 @@ import (
 	"log"
 	"os"
 
-	"codeberg.org/astrogo/fitsio"
+	"github.com/dkorunic/astro-analyzer/third_party/fitsio"
 )
 
 func Example_open() {

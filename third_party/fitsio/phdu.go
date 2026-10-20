@@ -4,33 +4,41 @@
 
 package fitsio
 
-import "reflect"
+import (
+	"reflect"
+	"slices"
+)
 
 type primaryHDU struct {
-	imageHDU
+	ImageHDU
 }
 
-// Name returns the value of the 'EXTNAME' Card (or "PRIMARY" if none)
+// Name returns the value of the 'EXTNAME' Card (or "PRIMARY" if none).
 func (hdu *primaryHDU) Name() string {
-	card := hdu.hdr.Get("EXTNAME")
-	if card == nil {
-		return "PRIMARY"
+	if card := hdu.hdr.Get("EXTNAME"); card != nil {
+		if name, ok := card.Value.(string); ok {
+			return name
+		}
 	}
-	return card.Value.(string)
+
+	return "PRIMARY"
 }
 
-// Version returns the value of the 'EXTVER' Card (or 1 if none)
+// Version returns the value of the 'EXTVER' Card (or 1 if none).
 func (hdu *primaryHDU) Version() int {
 	card := hdu.hdr.Get("EXTVER")
 	if card == nil {
 		return 1
 	}
 	rv := reflect.ValueOf(card.Value)
+
 	return int(rv.Int())
 }
 
 // NewPrimaryHDU creates a new PrimaryHDU with Header hdr.
 // If hdr is nil, a default Header will be created.
+//
+//nolint:ireturn // HDUs differ in type: the interface is the API
 func NewPrimaryHDU(hdr *Header) (Image, error) {
 	var err error
 
@@ -47,34 +55,34 @@ func NewPrimaryHDU(hdr *Header) (Image, error) {
 	}
 
 	cards := make([]Card, 0, 3)
-	if _, ok := keys["SIMPLE"]; !ok {
+	if _, ok := keys[kwSimple]; !ok {
 		cards = append(cards, Card{
-			Name:    "SIMPLE",
+			Name:    kwSimple,
 			Value:   true,
 			Comment: "primary HDU",
 		})
 	}
 
-	if _, ok := keys["BITPIX"]; !ok {
+	if _, ok := keys[kwBitpix]; !ok {
 		cards = append(cards, Card{
-			Name:    "BITPIX",
+			Name:    kwBitpix,
 			Value:   hdr.Bitpix(),
-			Comment: "number of bits per data pixel",
+			Comment: cmBitpix,
 		})
 	}
 
-	if _, ok := keys["NAXIS"]; !ok {
+	if _, ok := keys[kwNaxis]; !ok {
 		cards = append(cards, Card{
-			Name:    "NAXIS",
+			Name:    kwNaxis,
 			Value:   len(hdr.Axes()),
-			Comment: "number of data axes",
+			Comment: cmNaxis,
 		})
 	}
 
 	phdr := *hdr
-	phdr.cards = append(cards, hdr.cards...)
+	phdr.cards = slices.Concat(cards, hdr.cards)
 	hdu := &primaryHDU{
-		imageHDU{
+		ImageHDU{
 			hdr: phdr,
 			raw: make([]byte, 0),
 		},

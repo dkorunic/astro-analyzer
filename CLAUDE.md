@@ -15,7 +15,7 @@ locally. User-facing docs are in README.md.
 ## Commands
 
 ```sh
-go test ./...                    # all tests, ~2 s
+go test ./...                    # all tests, ~5 s (the fitsio fork's too)
 go test -race ./...
 golangci-lint run ./...          # must report 0 issues (.golangci.yml enables all linters)
 task fmt                         # gci + gofumpt + go fix + betteralign; run before committing
@@ -44,6 +44,7 @@ Dependencies only point downward in this list:
 | `internal/stats` | Median/MAD, outlier rule, Spearman, Chauvenet (RCR), sigma-clipped sky, wavelet MRS noise + background map, sky gradient plane, M* and two-sided scale (PSFSW, SNRW) |
 | `internal/fits` | Loading behind `source` (header + sample reader): FITS, fpack tiles (`fpack.go`: Rice, GZIP_1/2, NOCOMPRESS, dithered and lossless floats; HCOMPRESS_1 and PLIO_1 ported from cfitsio in `cfitsio.go`, which keeps NASA's notice), XISF (`xisf.go`: zlib/lz4/zstd via klauspost, own LZ4 block decoder), TIFF (`tiff.go`, x/image), RAW (`raw.go`, dcraw); fixtures in `testdata` from independent writers (`gen.py`; libXISF, fits-well and fitsy corpora in subdirectories, each with a README). FITS loading, BZERO/BSCALE, frame type, Origin ADU step and gain fixes, Bayer 2×2 binning and CFA sky, saturation mask, header metadata, TAN WCS, calibration pixel stats (`CalStats`), `PairNoise`/`PairGain` |
 | `internal/synth` | Test-only helpers: synthetic star fields and a FITS writer |
+| `third_party/fitsio` | Fork of codeberg.org/astrogo/fitsio v0.5.1 (BSD-3, `FORK.md`): FITS headers, images and binary tables, failing on corrupt files instead of panicking, lint-clean under our config |
 
 To add a per-frame metric: add the field to `analyze.Result`, compute it in
 `analyze.Frame`, then add one entry to `metrics` in `internal/report`. A
@@ -99,11 +100,14 @@ by the default run.
 
 ## Gotchas
 
-- `fitsio` is forked in `third_party/fitsio` (`replace` in go.mod,
-  `FORK.md`): upstream panics or allocates what a corrupt header claims.
+- `fitsio` is forked into this module as `third_party/fitsio` (import
+  path `github.com/dkorunic/astro-analyzer/third_party/fitsio`, `FORK.md`):
+  upstream panics or allocates what a corrupt header claims. No `replace`
+  in go.mod: `go install …@version` refuses a module that has one.
   `openFITS` passes an `*io.LimitedReader` of the file size so the fork
-  can refuse sizes past the file. `task fmt` leaves `third_party` alone;
-  run the fork's tests with `go test -vet=off ./...` in its directory.
+  can refuse sizes past the file. It is our code now: `go test ./...`,
+  `task fmt` and golangci-lint cover it like the rest. Its errors wrap
+  `fitsio.ErrFITS`.
 - Quantized fpack floats match cfitsio bit for bit (`TestReferenceDecodes`):
   every pixel, null or not, takes the next dither random; the random
   table is float32; `float64(v*scale) + zero` stops Go fusing the
@@ -113,7 +117,7 @@ by the default run.
   (`TestHcompressWide`: sums past 32 bits). astropy writes `SMOOTH` as a
   logical (`ZVAL2 = T`), fpack as a number. PLIO_1 tiles are 16-bit
   words (`1PI`): scanned as `[]int16`, a `[]byte` target gets half.
-- `fitsio` (codeberg.org/astrogo/fitsio) does **not** apply BZERO/BSCALE, and
+- `fitsio` does **not** apply BZERO/BSCALE, and
   `Image.Read` panics unless the destination slice already has capacity for
   every pixel (it only calls `SetLen`).
 - Header numbers decode as `int` or `float64`; strings keep trailing padding.

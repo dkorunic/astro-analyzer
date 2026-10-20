@@ -7,7 +7,6 @@ package fitsio
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"reflect"
 	"strconv"
@@ -18,41 +17,30 @@ type Decoder interface {
 	DecodeHDU() (HDU, error)
 }
 
-// NewDecoder creates a new Decoder according to the capabilities of the underlying io.Reader
+// NewDecoder creates a new Decoder according to the capabilities of the underlying io.Reader.
+//
+//nolint:ireturn // HDUs differ in type: the interface is the API
 func NewDecoder(r io.Reader) Decoder {
-	// FIXME(sbinet)
-	// if rr, ok := r.(io.ReadSeeker); ok {
-	// 	return &seekDecoder{r: rr}
-	// }
 	return &streamDecoder{r: r}
 }
 
 // streamDecoder is a decoder which can not perform random access
-// into the underlying Reader
+// into the underlying Reader.
 type streamDecoder struct {
 	r io.Reader
 }
 
-// alloc returns a buffer of n bytes for data still to be read, or an
-// error when n is negative or, with an *io.LimitedReader, more than the
-// reader has left: a corrupt header must fail, not allocate what it
-// claims. (astro-analyzer fork)
-func (dec *streamDecoder) alloc(n int) ([]byte, error) {
-	if lr, ok := dec.r.(*io.LimitedReader); n < 0 || ok && int64(n) > lr.N {
-		return nil, fmt.Errorf("fitsio: header asks for %d bytes, more than the file holds", n)
-	}
-	return make([]byte, n), nil
-}
-
 // mulSize multiplies sizes, false on a negative operand or overflow.
-// (astro-analyzer fork)
+// (astro-analyzer fork).
 func mulSize(a, b int) (int, bool) {
 	if a < 0 || b < 0 || b != 0 && a > math.MaxInt/b {
 		return 0, false
 	}
+
 	return a * b, true
 }
 
+//nolint:gocyclo,ireturn // one branch per FITS keyword form; HDUs differ in type, the interface is the API
 func (dec *streamDecoder) DecodeHDU() (HDU, error) {
 	var err error
 	var hdu HDU
@@ -60,18 +48,20 @@ func (dec *streamDecoder) DecodeHDU() (HDU, error) {
 	cards := make(map[string]int, 30)
 	slice := make([]Card, 0, 1)
 
-	get_card := func(k string) (Card, bool) {
+	getCard := func(k string) (Card, bool) {
 		i, ok := cards[k]
 		if ok {
 			return slice[i], ok
 		}
+
 		return Card{}, ok
 	}
 
-	add_card := func(c *Card) {
+	addCard := func(c *Card) {
 		n := c.Name
-		if n == "COMMENT" || n == "HISTORY" || n == "" {
+		if n == kwComment || n == kwHistory || n == "" {
 			slice = append(slice, *c)
+
 			return
 		}
 		// For compatibility with C FITSIO, silently swallow duplicate card keys.
@@ -80,7 +70,7 @@ func (dec *streamDecoder) DecodeHDU() (HDU, error) {
 		//
 		// _, dup := cards[n]
 		// if dup {
-		// 	panic(fmt.Errorf("fitsio: duplicate keyword [%s]", n))
+		// 	panic(fmt.Errorf("%w: duplicate keyword [%s]", ErrFITS, n))
 		// }
 		cards[n] = len(slice)
 		slice = append(slice, *c)
@@ -92,7 +82,7 @@ func (dec *streamDecoder) DecodeHDU() (HDU, error) {
 	iblock := -1
 blocks_loop:
 	for {
-		iblock += 1
+		iblock++
 		_, err = io.ReadFull(dec.r, buf)
 		if err != nil {
 			return nil, err
@@ -108,45 +98,47 @@ blocks_loop:
 			if card.Name == "CONTINUE" {
 				idx := len(slice) - 1
 				if idx < 0 {
-					return nil, fmt.Errorf("fitsio: CONTINUE card without a card to continue")
+					return nil, fmt.Errorf("%w: CONTINUE card without a card to continue", ErrFITS)
 				}
 				last := slice[idx]
 				str, ok := last.Value.(string)
 				if !ok {
-					return nil, fmt.Errorf("fitsio: CONTINUE card after non-string card %q", last.Name)
+					return nil, fmt.Errorf("%w: CONTINUE card after non-string card %q", ErrFITS, last.Name)
 				}
 				if len(str) > 0 {
 					last.Value = str[:len(str)-1] + card.Comment
 				}
 				slice[idx] = last
+
 				continue
 			}
-			add_card(card)
-			if card.Name == "END" {
+			addCard(card)
+			if card.Name == kwEnd {
 				break
 			}
 		}
 
-		_, ends := get_card("END")
-		if ends {
-			card, ok := get_card("NAXIS")
+		_, ends := getCard(kwEnd)
+		if ends { //nolint:nestif // upstream's parser: one branch per FITS type or keyword form
+			card, ok := getCard(kwNaxis)
 			if ok {
 				n, ok := card.Value.(int)
 				if !ok || n < 0 || n > 999 {
-					return nil, fmt.Errorf("fitsio: invalid NAXIS %v", card.Value)
+					return nil, fmt.Errorf("%w: invalid NAXIS %v", ErrFITS, card.Value)
 				}
 				axes = make([]int, n)
 				for i := range n {
 					k := fmt.Sprintf("NAXIS%d", i+1)
-					c, ok := get_card(k)
+					c, ok := getCard(k)
 					if !ok {
-						return nil, fmt.Errorf("fitsio: missing '%s' key", k)
+						return nil, fmt.Errorf("%w: missing '%s' key", ErrFITS, k)
 					}
 					if axes[i], ok = c.Value.(int); !ok || axes[i] < 0 {
-						return nil, fmt.Errorf("fitsio: invalid %s %v", k, c.Value)
+						return nil, fmt.Errorf("%w: invalid %s %v", ErrFITS, k, c.Value)
 					}
 				}
 			}
+
 			break blocks_loop
 		}
 	}
@@ -156,60 +148,70 @@ blocks_loop:
 		return nil, err
 	}
 
-	bitpix := 0
-	if card, ok := get_card("BITPIX"); ok {
+	var bitpix int
+	if card, ok := getCard(kwBitpix); ok {
 		v := reflect.ValueOf(card.Value)
 		if !v.CanInt() {
-			return nil, fmt.Errorf("fitsio: invalid BITPIX %v", card.Value)
+			return nil, fmt.Errorf("%w: invalid BITPIX %v", ErrFITS, card.Value)
 		}
 		bitpix = int(v.Int())
 	} else {
-		return nil, fmt.Errorf("fitsio: missing 'BITPIX' card")
+		return nil, fmt.Errorf("%w: missing 'BITPIX' card", ErrFITS)
 	}
 
 	hdr := NewHeader(slice, htype, bitpix, axes)
 	switch htype {
-	case IMAGE_HDU:
+	case HDUImage:
 		var data []byte
 		data, err = dec.loadImage(hdr)
 		if err != nil {
-			return nil, fmt.Errorf("fitsio: error loading image: %v", err)
+			return nil, fmt.Errorf("%w: error loading image: %w", ErrFITS, err)
 		}
 
 		switch primary {
 		case true:
 			hdu = &primaryHDU{
-				imageHDU: imageHDU{
-					hdr: *hdr,
-					raw: data,
-				},
+				hdr: *hdr,
+				raw: data,
 			}
 		case false:
-			hdu = &imageHDU{
+			hdu = &ImageHDU{
 				hdr: *hdr,
 				raw: data,
 			}
 		}
 
-	case BINARY_TBL:
+	case HDUBinaryTable:
 		hdu, err = dec.loadTable(hdr, htype)
 		if err != nil {
-			return nil, fmt.Errorf("fitsio: error loading binary table: %v", err)
+			return nil, fmt.Errorf("%w: error loading binary table: %w", ErrFITS, err)
 		}
 
-	case ASCII_TBL:
+	case HDUASCIITable:
 		hdu, err = dec.loadTable(hdr, htype)
 		if err != nil {
-			return nil, fmt.Errorf("fitsio: error loading ascii table: %v", err)
+			return nil, fmt.Errorf("%w: error loading ascii table: %w", ErrFITS, err)
 		}
 
-	case ANY_HDU:
+	case HDUAny:
 		fallthrough
 	default:
-		return nil, fmt.Errorf("fitsio: invalid HDU Type (%v)", htype)
+		return nil, fmt.Errorf("%w: invalid HDU Type (%v)", ErrFITS, htype)
 	}
 
 	return hdu, err
+}
+
+// alloc returns a buffer of n bytes for data still to be read, or an
+// error when n is negative or, with an *io.LimitedReader, more than the
+// reader has left: a corrupt header must fail, not allocate what it
+// claims. (astro-analyzer fork).
+func (dec *streamDecoder) alloc(n int) ([]byte, error) {
+	if lr, ok := dec.r.(*io.LimitedReader); n < 0 || ok && int64(n) > lr.N {
+		return nil, fmt.Errorf("%w: header asks for %d bytes, more than the file holds", ErrFITS, n)
+	}
+
+	return make([]byte, n), nil
 }
 
 func (dec *streamDecoder) loadImage(hdr *Header) ([]byte, error) {
@@ -220,11 +222,11 @@ func (dec *streamDecoder) loadImage(hdr *Header) ([]byte, error) {
 	for _, dim := range hdr.Axes() {
 		var ok bool
 		if nelmts, ok = mulSize(nelmts, dim); !ok {
-			return nil, fmt.Errorf("fitsio: image size %v overflows", hdr.Axes())
+			return nil, fmt.Errorf("%w: image size %v overflows", ErrFITS, hdr.Axes())
 		}
 	}
 
-	if len(hdr.Axes()) <= 0 {
+	if len(hdr.Axes()) == 0 {
 		nelmts = 0
 	}
 
@@ -235,7 +237,7 @@ func (dec *streamDecoder) loadImage(hdr *Header) ([]byte, error) {
 
 	size, ok := mulSize(nelmts, pixsz)
 	if !ok {
-		return nil, fmt.Errorf("fitsio: image size %v overflows", hdr.Axes())
+		return nil, fmt.Errorf("%w: image size %v overflows", ErrFITS, hdr.Axes())
 	}
 	buf, err = dec.alloc(size)
 	if err != nil {
@@ -247,36 +249,37 @@ func (dec *streamDecoder) loadImage(hdr *Header) ([]byte, error) {
 
 	n, err := io.ReadFull(dec.r, buf)
 	if err != nil {
-		return nil, fmt.Errorf("fitsio: error reading %d bytes (got %d): %v", len(buf), n, err)
+		return nil, fmt.Errorf("%w: error reading %d bytes (got %d): %w", ErrFITS, len(buf), n, err)
 	}
 
 	// data array is also aligned at 2880-bytes blocks
 	pad := padBlock(n)
 	if pad > 0 {
-		if n, err := io.CopyN(ioutil.Discard, dec.r, int64(pad)); err != nil {
-			return nil, fmt.Errorf("fitsio: error reading %d bytes (got %d): %v", pad, n, err)
+		if n, err := io.CopyN(io.Discard, dec.r, int64(pad)); err != nil {
+			return nil, fmt.Errorf("%w: error reading %d bytes (got %d): %w", ErrFITS, pad, n, err)
 		}
 	}
 
 	return buf, err
 }
 
+//nolint:gocyclo,maintidx // upstream's parser: one branch per FITS type or keyword form
 func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) {
 	var err error
 	var table *Table
 
-	isbinary := true
-	switch htype {
-	case ASCII_TBL:
+	var isbinary bool
+	switch htype { //nolint:exhaustive // the default case handles the other values
+	case HDUASCIITable:
 		isbinary = false
-	case BINARY_TBL:
+	case HDUBinaryTable:
 		isbinary = true
 	default:
-		return nil, fmt.Errorf("fitsio: invalid HDU type (%v)", htype)
+		return nil, fmt.Errorf("%w: invalid HDU type (%v)", ErrFITS, htype)
 	}
 
 	if len(hdr.Axes()) != 2 {
-		return nil, fmt.Errorf("fitsio: table with NAXIS %d, want 2", len(hdr.Axes()))
+		return nil, fmt.Errorf("%w: table with NAXIS %d, want 2", ErrFITS, len(hdr.Axes()))
 	}
 	rowsz := hdr.Axes()[0]
 	nrows := int64(hdr.Axes()[1])
@@ -288,8 +291,9 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 		}
 		v, ok := card.Value.(int)
 		if !ok || v < 0 {
-			return 0, fmt.Errorf("fitsio: invalid %s %v", name, card.Value)
+			return 0, fmt.Errorf("%w: invalid %s %v", ErrFITS, name, card.Value)
 		}
+
 		return v, nil
 	}
 	ncols, err := intCard("TFIELDS")
@@ -297,19 +301,19 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 		return nil, err
 	}
 	if ncols > 999 {
-		return nil, fmt.Errorf("fitsio: invalid TFIELDS %d", ncols)
+		return nil, fmt.Errorf("%w: invalid TFIELDS %d", ErrFITS, ncols)
 	}
 
 	datasz, ok := mulSize(int(nrows), rowsz)
 	if !ok {
-		return nil, fmt.Errorf("fitsio: table size %d × %d overflows", rowsz, nrows)
+		return nil, fmt.Errorf("%w: table size %d × %d overflows", ErrFITS, rowsz, nrows)
 	}
 	heapsz, err := intCard("PCOUNT")
 	if err != nil {
 		return nil, err
 	}
 	if datasz > math.MaxInt-heapsz-blockSize {
-		return nil, fmt.Errorf("fitsio: table size %d + %d overflows", datasz, heapsz)
+		return nil, fmt.Errorf("%w: table size %d + %d overflows", ErrFITS, datasz, heapsz)
 	}
 
 	blocksz := alignBlock(datasz + heapsz)
@@ -320,7 +324,7 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 	}
 	n, err := io.ReadFull(dec.r, block)
 	if err != nil {
-		return nil, fmt.Errorf("fitsio: error reading %d bytes (got %d): %v", len(block), n, err)
+		return nil, fmt.Errorf("%w: error reading %d bytes (got %d): %w", ErrFITS, len(block), n, err)
 	}
 
 	// THEAP is the heap's offset from the table's start (FITS standard 4.0
@@ -335,7 +339,7 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 		theap += datasz
 	}
 	if theap > datasz+heapsz {
-		return nil, fmt.Errorf("fitsio: THEAP %d past the table's %d bytes", theap, datasz+heapsz)
+		return nil, fmt.Errorf("%w: THEAP %d past the table's %d bytes", ErrFITS, theap, datasz+heapsz)
 	}
 
 	data := block[:datasz]
@@ -349,18 +353,18 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 	}
 
 	offset := 0
-	for i := 0; i < ncols; i++ {
+	for i := range ncols {
 		col := &cols[i]
 
-		switch htype {
-		case BINARY_TBL:
+		switch htype { //nolint:exhaustive // the default case handles the other values
+		case HDUBinaryTable:
 			col.write = col.writeBin
 			col.read = col.readBin
-		case ASCII_TBL:
+		case HDUASCIITable:
 			col.write = col.writeTxt
 			col.read = col.readTxt
 		default:
-			return nil, fmt.Errorf("fitsio: invalid HDUType (%v)", htype)
+			return nil, fmt.Errorf("%w: invalid HDUType (%v)", ErrFITS, htype)
 		}
 
 		col.offset = offset
@@ -374,9 +378,9 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 
 		card = get("TFORM", i)
 		if card == nil {
-			return nil, fmt.Errorf("fitsio: missing 'TFORM%d' for column '%s'", i+1, col.Name)
+			return nil, fmt.Errorf("%w: missing 'TFORM%d' for column '%s'", ErrFITS, i+1, col.Name)
 		} else if col.Format, ok = card.Value.(string); !ok {
-			return nil, fmt.Errorf("fitsio: TFORM%d %v is not a string", i+1, card.Value)
+			return nil, fmt.Errorf("%w: TFORM%d %v is not a string", ErrFITS, i+1, card.Value)
 		}
 
 		card = get("TUNIT", i)
@@ -399,7 +403,7 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 			case int:
 				col.Bscale = float64(vv)
 			default:
-				return nil, fmt.Errorf("fitsio: unhandled type [%T]", vv)
+				return nil, fmt.Errorf("%w: unhandled type [%T]", ErrFITS, vv)
 			}
 		} else {
 			col.Bscale = 1.0
@@ -415,7 +419,7 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 			case int:
 				col.Bzero = float64(vv)
 			default:
-				return nil, fmt.Errorf("fitsio: unhandled type [%T]", vv)
+				return nil, fmt.Errorf("%w: unhandled type [%T]", ErrFITS, vv)
 			}
 		} else {
 			col.Bzero = 0.0
@@ -423,14 +427,14 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 
 		card = get("TDISP", i)
 		if card != nil && card.Value != nil {
-			col.Display = card.Value.(string)
+			col.Display, _ = card.Value.(string)
 		}
 
 		card = get("TDIM", i)
 		if card != nil && card.Value != nil {
-			dims := card.Value.(string)
-			dims = strings.Replace(dims, "(", "", -1)
-			dims = strings.Replace(dims, ")", "", -1)
+			dims, _ := card.Value.(string)
+			dims = strings.ReplaceAll(dims, "(", "")
+			dims = strings.ReplaceAll(dims, ")", "")
 			toks := make([]string, 0)
 			for tok := range strings.SplitSeq(dims, ",") {
 				tok = strings.Trim(tok, " \t\n")
@@ -451,7 +455,11 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 
 		card = get("TBCOL", i)
 		if card != nil && card.Value != nil {
-			col.Start = int64(card.Value.(int))
+			start, ok := card.Value.(int)
+			if !ok {
+				return nil, fmt.Errorf("%w: TBCOL%d %v is not an integer", ErrFITS, i+1, card.Value)
+			}
+			col.Start = int64(start)
 		}
 
 		col.dtype, err = typeFromForm(col.Format, htype)
@@ -459,7 +467,7 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 			return nil, err
 		}
 		offset += col.dtype.dsize * col.dtype.len
-		if htype == ASCII_TBL {
+		if htype == HDUASCIITable {
 			col.txtfmt = txtfmtFromForm(col.Format)
 		}
 		colidx[col.Name] = i
@@ -479,16 +487,6 @@ func (dec *streamDecoder) loadTable(hdr *Header, htype HDUType) (*Table, error) 
 	return table, err
 }
 
-// seekDecoder is a decoder which can perform random access into
-// the underlying Reader
-type seekDecoder struct {
-	r io.ReadSeeker
-}
-
-func (dec *seekDecoder) DecodeHDU() (HDU, error) {
-	panic("not implemented")
-}
-
 func hduTypeFrom(cards []Card) (HDUType, bool, error) {
 	var err error
 	var htype HDUType = -1
@@ -498,27 +496,31 @@ func hduTypeFrom(cards []Card) (HDUType, bool, error) {
 	for _, card := range cards {
 		keys = append(keys, card.Name)
 		switch card.Name {
-		case "SIMPLE":
+		case kwSimple:
 			primary = true
-			return IMAGE_HDU, primary, nil
-		case "XTENSION":
-			str := card.Value.(string)
+
+			return HDUImage, primary, nil
+		case kwXtension:
+			str, ok := card.Value.(string)
+			if !ok {
+				return htype, primary, fmt.Errorf("%w: XTENSION %v is not a string", ErrFITS, card.Value)
+			}
 			switch str {
 			case "IMAGE":
-				htype = IMAGE_HDU
+				htype = HDUImage
 			case "TABLE":
-				htype = ASCII_TBL
-			case "BINTABLE":
-				htype = BINARY_TBL
+				htype = HDUASCIITable
+			case xtBintable:
+				htype = HDUBinaryTable
 			case "ANY", "ANY_HDU":
-				htype = ANY_HDU
+				htype = HDUAny
 			default:
-				return htype, primary, fmt.Errorf("fitsio: invalid 'XTENSION' value: %q", str)
+				return htype, primary, fmt.Errorf("%w: invalid 'XTENSION' value: %q", ErrFITS, str)
 			}
 
 			return htype, primary, err
 		}
 	}
 
-	return htype, primary, fmt.Errorf("fitsio: invalid header (missing 'SIMPLE' or 'XTENSION' card): keys=%v", keys)
+	return htype, primary, fmt.Errorf("%w: invalid header (missing 'SIMPLE' or 'XTENSION' card): keys=%v", ErrFITS, keys)
 }
