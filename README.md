@@ -6,13 +6,18 @@
 
 A fast, local command-line tool that measures the quality of astrophotography
 FITS subframes: star count, FWHM, eccentricity, SNR, sky background and
-noise. It flags bad frames, shows how a session evolved over the night,
-sums integration time per filter and night with the Moon and twilight
-conditions, maps how star shapes vary across the field to diagnose tilt,
-coma and tracking errors, and shows how much of a rotating stack keeps full
-depth. It also recommends PixInsight DrizzleIntegration settings
-(Scale and Drop shrink) from the measured sampling and dithering, and
-predicts what PixInsight's WBPP will decide for the session.
+noise, gradient, hot pixels and PixInsight's PSF SNR, PSF Signal Weight
+and SNRW frame weights. It flags bad frames, shows how a session evolved over the
+night (and warns of focus drift with temperature), sums integration time
+per filter and night with the Moon and twilight conditions, checks the
+session's bias, dark and flat frames against the lights (settings, banding,
+dark pedestal and hot pixels, dust, photon-transfer gain, master noise),
+maps how star shapes vary across the field to diagnose tilt, coma and
+tracking errors, and shows how much of a rotating stack keeps full depth.
+It also recommends PixInsight DrizzleIntegration settings (Scale and Drop
+shrink) from the measured sampling and dithering, predicts what
+PixInsight's WBPP will decide for the session, and compares sub lengths by
+read-noise cost and field-rotation smear.
 
 Nothing is uploaded, converted or sent anywhere: frames are read, measured
 and reported locally. The measurement conventions follow PixInsight
@@ -76,7 +81,7 @@ measured so far.
 | `-psf` | `moffat4` | PSF model: `moffat4` (PixInsight's default), `moffat` (free β, ~8× slower) or `gaussian` |
 | `-sigma` | `5` | Star detection threshold, in noise sigmas above the local background |
 | `-gain` | from `EGAIN` | Camera gain in e⁻/ADU. Without it the photon-noise term is left out of SNR, as PixInsight does |
-| `-read-noise` | camera preset | Read noise in e⁻ for the sub-length comparison. Presets cover the Celestron Origin Mark II and ZWO cameras at their deep-sky gain (`GAIN` header) |
+| `-read-noise` | camera preset | Read noise in e⁻ for the sub-length comparison. Without it, read from the session's bias frames, else a preset: Celestron Origin and Origin Mark II, 21 ZWO cameras and the Player One Neptune-C II at their deep-sky gain (`GAIN` header) |
 | `-reject-sigma` | `3` | Flag a frame when it is worse than the session median by this many robust sigmas… |
 | `-reject-min` | `0.1` | …and by at least this fraction of the median, so stable sessions are not over-flagged |
 | `-best` | `100` | Also flag frames outside the best this percent per filter by wFWHM, as Siril's `stack -filter-wfwhm=N%` keeps them (e.g. `-best=90`) |
@@ -96,9 +101,9 @@ astro-analyzer -reject ~/astro/M27 | xargs -I{} mv {} ~/astro/M27/rejected/
 One row per frame, sorted by `DATE-OBS`:
 
 ```
-File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  Ecc   Resid   SNR  PSF SNR   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Hot     Flags
-Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4136   4.14     4.86   5.10    0.73  0.0047  4.0  0.000186  6518.8      297.11  299.46  85.6      5775.0  6575.0  6975.0  7436.3
-Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3823   7.32     9.60   9.01    0.94  0.0056  3.8  0.000307  6512.5      296.86  298.30  89.4      5775.0  6575.0  6975.0  7427.5  Resid
+File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Hot     Flags
+Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  7436.3
+Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  7427.5  Resid
 ```
 
 Then the equipment and integration time per filter, with one row per
@@ -117,15 +122,16 @@ explicitly in WBPP or Debayer.
 ```
 Bubble Nebula · RASA6F2 152 mm f/2.2 · Origin678C-643c1983c23be8af7 · CFA GBRG · 1.23"/px, field 79′ × 45′
 
-Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 28 min unflagged, over 2 nights
+Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 29 min unflagged, over 2 nights
   Night       Frames  Time         FWHM px  Background  Gradient  Moon lit  Moon up  Moon dist  Twilight
   2026-10-13  658     20:06–00:06  5.43     6165.6      74.9 ←    10%       0%       124°       0
-  2026-10-16  682     20:11–00:20  4.75     6262.5      80.1 ←    33%       24%      108°       0
+  2026-10-16  682     20:11–00:20  4.76     6262.5      80.1 ←    33%       24%      108°       0
 ```
 
 When the directories hold calibration frames, their headers are checked
 against the lights': gain or ISO for bias and darks, dark exposure and a
-sensor temperature 5 °C or more away, the flat's filter and frame size.
+sensor temperature 5 °C or more away, the flat's filter, and any frame
+size the lights lack.
 Files sharing one `DATE-OBS` are copies of one capture, as the Origin saves
 its masters. Then what their pixels show:
 
@@ -173,13 +179,15 @@ beyond ±0.5 over at least 1 °C and 8 frames, after dividing out the seeing's
 airmass^0.6), a line suggests focus drift:
 
 ```
-Session: 1340 frames, 28 flagged
+Session: 1340 frames, 26 flagged
+Reference frame for registration: Light1135.fits (best wFWHM 3.46 px, 4445 stars)
 
-Metric      Median   σ (MAD)  Min       Max      Trend
-Stars       4004     457.4    3203      4531     ▅▄▃▂▂▂▂▂▂▃▃▃▄▄▅▅▆▆▆▇▇▇▇██████▅▂▂▁▁▁▁▁▂▂▃▃▅▅▅▆▆▆▇▇▇████▇▆▇▇▆▇
-FWHM "      6.22     1.289    4.14      11.40    ▅▇███▇▆▆▆▆▅▅▄▄▄▄▄▄▃▃▃▃▃▂▂▂▃▃▃▃▅▅▅▅▅▅▄▄▄▃▃▃▂▂▂▂▂▁▂▁▁▁▁▂▂▃▃▃▄▃
-PSF SNR     0.00044  0.00013  0.000186  0.00119  ▁▂▃▃▃▃▃▃▃▃▃▅▄▄▃▄▄▅▄▄▄▆▆▆▅▅▆█▇▄▁▂▂▂▂▂▂▂▂▂▂▂▁▂▃▃▂▁▃▃▄▄▃▃▄▇▇▅▆▄
-Background  6225.0   222.39   5968.8    6800.0   ▆▆▆▆▆▅▅▄▄▄▄▄▃▃▃▂▂▂▂▂▂▂▂▁▁▁▁▁▁▅██▇▇▇▇▇▇▆▆▅▄▄▄▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂
+Metric      Median    σ (MAD)  Min       Max      Trend
+Stars       3997      458.1    3196      4521     ▅▄▃▂▂▂▂▂▂▃▃▃▄▄▅▅▆▆▆▇▇▇▇██████▅▂▂▁▁▁▁▂▂▂▃▃▅▅▅▆▆▆▇▇▇████▇▆▇▇▆▇
+FWHM "      6.25      1.293    4.12      11.45    ▅▇███▇▆▆▆▆▅▅▄▄▄▄▄▄▃▃▃▃▃▂▂▂▃▃▃▃▅▅▅▅▅▅▄▄▄▃▃▃▂▂▂▃▂▁▂▁▁▁▁▂▂▄▃▃▄▃
+PSF SNR     0.000411  0.00012  0.000166  0.00115  ▁▂▃▃▄▃▃▃▃▃▃▅▅▄▃▃▄▅▄▄▄▆▆▆▅▅▆█▇▄▁▂▂▂▂▂▂▂▂▂▂▂▁▂▂▃▂▁▃▃▃▃▃▃▄▇█▄▆▄
+PSFSW       0.000579  0.00036  0.000156  0.00112  ▁▁▁▁▁▁▂▂▂▂▂▃▃▃▄▄▅▅▅▅▆▇▇█▇▇▇██▄▁▂▂▂▂▂▂▂▃▃▃▄▄▄▅▅▅▅▆▇██▇▆▆▆▇▆▅▆
+Background  6225.0    222.39   5968.8    6800.0   ▆▆▆▆▆▅▅▄▄▄▄▄▃▃▃▂▂▂▂▂▂▂▂▁▁▁▁▁▁▅██▇▇▇▇▇▇▆▆▅▄▄▄▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂
 ```
 
 And a field map: median FWHM, eccentricity and the dominant elongation axis
@@ -188,10 +196,10 @@ in each ninth of the frame, over the whole session (one map per filter):
 ```
 Field: median FWHM px, eccentricity and elongation axis (top = last FITS row)
         left          centre        right
-top     4.06  0.85 │  5.01  0.69 │  6.84  0.60 ╱
-middle  4.48  0.78 │  5.74  0.60 ·  7.97  0.59 ╱
-bottom  5.24  0.73 ╲  6.67  0.59 ─  9.30  0.63 ╱
-FWHM tilt 91% (corners 4.06–9.30 px), curvature +5% (corners vs centre), right vs left +78%, top vs bottom -25%
+top     4.07  0.85 │  5.01  0.69 │  6.86  0.60 ╱
+middle  4.48  0.78 │  5.75  0.60 ·  7.98  0.59 ╱
+bottom  5.24  0.73 ╲  6.68  0.59 ─  9.35  0.63 ╱
+FWHM tilt 92% (corners 4.07–9.35 px), curvature +5% (corners vs centre), right vs left +78%, top vs bottom -25%
 ```
 
 Reading the field map:
@@ -208,7 +216,7 @@ only the middle of the reference frame has full depth; crop to it. Plate
 solutions (`ASTRSOLV` not false) of the unflagged frames give the answer:
 
 ```
-Stack coverage: 1308 plate-solved frames, field rotates 132°
+Stack coverage: 1310 plate-solved frames, field rotates 132°
   every frame over 42% of the reference frame, 90% of frames over 47%, half over 71%
 ```
 
@@ -216,8 +224,8 @@ Finally, a recommendation for PixInsight's DrizzleIntegration, based on the
 frames that were not flagged:
 
 ```
-Drizzle: 1312 unflagged frames, dither measured from plate solutions: stars move up to 2480 px, field rotates 132° (4 unsolved frames left out)
-  Sampling        median FWHM 5.03 px, well sampled (drizzle adds resolution below 2.5 px)
+Drizzle: 1314 unflagged frames, dither measured from plate solutions: stars move up to 2480 px, field rotates 132° (4 unsolved frames left out)
+  Sampling        median FWHM 5.05 px, well sampled (drizzle adds resolution below 2.5 px)
   Recommendation  CFA drizzle, Scale 1, Drop shrink 1.00
                   recovers full colour resolution without debayer interpolation
   Expected        weights image rms 11% of median (keep under 20%), noise correlation R 1.50
@@ -302,14 +310,14 @@ you can see them before a multi-hour run:
   (15+ frames) is available but never picked automatically.
 
 ```
-WBPP: 1312 unflagged frames
+WBPP: 1314 unflagged frames
   Integration     fast integration, which WBPP enables at 150+ frames: no minimum weight or rejection algorithm to set
   Autocrop        keeps about 1687 × 1635 px, 33% of the reference frame (where 75%+ of frames overlap)
-  Normalization   gradients differ between frames by 53.8 ADU across the field (median), 7.7× the stack's noise;
+  Normalization   gradients differ between frames by 53.9 ADU across the field (median), 7.7× the stack's noise;
                   WBPP skips local normalization under fast integration: turn that off to apply it, or remove the gradient from the master
-  Weighting       none (default)  SNR  96.3% of best, stack FWHM ≈ 5.32 px
-                  Resolution      SNR  93.1%, ≈ 4.97 px
-                  PSF SNR         SNR 100.0%, ≈ 5.29 px
+  Weighting       none (default)  SNR  96.3% of best, stack FWHM ≈ 5.34 px
+                  Resolution      SNR  92.8%, ≈ 4.99 px
+                  PSF SNR         SNR 100.0%, ≈ 5.32 px
   Recommendation  enable weighting: up to +3.9% SNR, worth 7.9% more exposure, at almost no cost
                   PSF SNR for depth, Resolution for detail
 ```
@@ -339,16 +347,16 @@ subs would do better, for the same total time:
 
 ```
 Sub length: 15 s subs
-  Noise           5.5 e⁻ per pixel, read noise 1.1 e⁻ (≤ Celestron Origin Mark II at ISO 1000, from its bias master)
-                  shot noise 2 e⁻/s (sky, target, dark): read noise costs ≤ 5% SNR from 6 s
+  Noise           5.5 e⁻ per pixel, read noise 0.92 e⁻ (≤, from this session's 9-frame bias master)
+                  shot noise 2 e⁻/s (sky, target, dark): read noise costs ≤ 5% SNR from 4 s
   Field rotation  0.0076°/s median, 0.0121°/s p90; corner stars smear tangentially (median FWHM 5.08 px)
   Sub      SNR vs no read noise  Corner smear median / p90
-  5 s      94.3%                 1.5 / 2.3 px
-  10 s     97.0%                 2.9 / 4.7 px
-  15 s     98.0%                 4.4 / 7.0 px              ← now
-  20 s     98.5%                 5.9 / 9.4 px
-  30 s     99.0%                 8.8 / 14.1 px
-  60 s     99.5%                 17.6 / 28.2 px
+  5 s      95.9%                 1.5 / 2.3 px
+  10 s     97.9%                 2.9 / 4.7 px
+  15 s     98.6%                 4.4 / 7.0 px              ← now
+  20 s     98.9%                 5.9 / 9.4 px
+  30 s     99.3%                 8.8 / 14.1 px
+  60 s     99.6%                 17.6 / 28.2 px
 ```
 
 ### Columns
@@ -374,6 +382,14 @@ Sub length: 15 s subs
 | Flags | Metrics where the frame is an outlier among its filter's frames: high FWHM, Ecc, Resid, Background or Gradient, or low Stars, SNR, PSF SNR, PSFSW or SNRW |
 
 Unknown values print as `-`, are empty in CSV and are omitted keys in JSON.
+
+`-csv` and `-json` write one record per frame with only these per-frame
+metrics, not the session sections. Keys: `file`, `date`, `filter`,
+`exptime`, `ccd_temp`, `altitude`, `moon_alt`, `sun_alt`, `stars`,
+`fwhm_px`, `wfwhm`, `fwhm_arcsec`, `eccentricity`, `psf_residual`, `snr`,
+`psf_snr`, `psf_signal_weight`, `snr_weight`, `background`, `stddev`,
+`noise_mrs`, `gradient`, `sky_r`, `sky_g`, `sky_b`, `hot_pixel_level` and
+`flags`.
 
 ## How it measures
 

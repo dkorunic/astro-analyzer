@@ -1,9 +1,13 @@
 # CLAUDE.md
 
 Go CLI that measures FITS astrophotography subframes (stars, FWHM,
-eccentricity, SNR, sky background, wavelet noise), flags outlier frames and
-maps star shape across the field. Runs fully locally. User-facing docs are in
-README.md.
+eccentricity, SNR and PixInsight's PSF SNR / PSFSW / SNRW weights, sky
+background and gradient, wavelet noise, hot pixels), flags outlier frames,
+maps star shape across the field and reports per session: integration per
+night with Moon and twilight, calibration-frame checks (headers, bias
+banding, dark pedestal and hot pixels, flats, photon-transfer gain, master
+noise), stack coverage, drizzle and WBPP settings, and a sub-length
+comparison. Runs fully locally. User-facing docs are in README.md.
 
 ## Commands
 
@@ -29,13 +33,13 @@ Dependencies only point downward in this list:
 | Package | Role |
 |---|---|
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
-| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration header check (`calib.go`), session summary + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and read-noise presets (`subs.go`), CSV/JSON |
+| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and read-noise presets (`subs.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
-| `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, 3×3 field cells |
+| `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, PSF SNR/PSFSW/SNRW, gradient, hot level, raw pixel noise, Sun/Moon, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
 | `internal/sky` | Low-precision Sun and Moon positions (Astronomical Almanac), altitude, illumination |
-| `internal/stats` | Median/MAD, outlier rule, sigma-clipped sky, wavelet MRS noise + background map |
-| `internal/fits` | FITS loading, BZERO/BSCALE, Bayer 2×2 binning, saturation mask, header metadata, TAN WCS |
+| `internal/stats` | Median/MAD, outlier rule, Spearman, Chauvenet (RCR), sigma-clipped sky, wavelet MRS noise + background map, sky gradient plane, M* and two-sided scale (PSFSW, SNRW) |
+| `internal/fits` | FITS loading, BZERO/BSCALE, frame type, Origin ADU step and gain fixes, Bayer 2×2 binning and CFA sky, saturation mask, header metadata, TAN WCS, calibration pixel stats (`CalStats`), `PairNoise`/`PairGain` |
 | `internal/synth` | Test-only helpers: synthetic star fields and a FITS writer |
 
 To add a per-frame metric: add the field to `analyze.Result`, compute it in
@@ -43,6 +47,12 @@ To add a per-frame metric: add the field to `analyze.Result`, compute it in
 score that depends on the session (like wFWHM) goes on `report.Frame`
 instead, set before `FlagOutliers`. That
 entry drives the table column, CSV/JSON key, summary row and outlier flag.
+
+The default output runs, in order (`main.go`): `Table`, `Overview`,
+`Calibration`, `Summary`, `Field`, `Coverage`, `Drizzle`, `WBPP`,
+`SubLength`. README shows each section's output from a real Bubble Nebula
+session (Origin Mark II, 1340 frames); refresh those examples when a
+section's format changes, and list a new metric's CSV/JSON key there.
 
 ## Conventions
 
