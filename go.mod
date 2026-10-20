@@ -7,3 +7,5 @@ require (
 	github.com/klauspost/compress v1.20.3
 	golang.org/x/image v0.47.0
 )
+
+replace codeberg.org/astrogo/fitsio => ./third_party/fitsio

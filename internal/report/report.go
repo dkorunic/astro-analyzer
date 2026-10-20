@@ -322,7 +322,7 @@ func summary(w io.Writer, frames []Frame, label string) {
 		fmt.Fprintf(w, "Reference frame for registration: %s (best wFWHM %.2f px, %d stars)\n",
 			filepath.Base(best.Path), best.WFWHM, best.Result.Stars)
 	}
-	for _, line := range []string{focusDrift(frames), refocus(frames), focusSlope(frames), tempTrigger(frames), hfrTrigger(frames), cloud(frames)} {
+	for _, line := range []string{focusDrift(frames), refocus(frames), focusSlope(frames), tempTrigger(frames), timeTrigger(frames), hfrTrigger(frames), cloud(frames), wind(frames)} {
 		if line != "" {
 			fmt.Fprintln(w, line)
 		}

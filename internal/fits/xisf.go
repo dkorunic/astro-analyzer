@@ -5,7 +5,12 @@ package fits
 
 import (
 	"bytes"
+	"crypto/sha1" //nolint:gosec // XISF names SHA-1 among its checksums
+	"crypto/sha256"
+	"crypto/sha3"
+	"crypto/sha512"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -25,8 +30,16 @@ var (
 	ErrXISF      = errors.New("not an XISF 1.0 file")
 	ErrXISFData  = errors.New("unsupported XISF image")
 	ErrLZ4       = errors.New("corrupt LZ4 block")
+	ErrChecksum  = errors.New("XISF block fails its checksum")
 	errShortRead = errors.New("decompressed size differs from the header's")
 )
+
+// expansion is the most each codec can expand its input, with room to
+// spare (DEFLATE ~1032:1, LZ4 ~255:1, zstd measured above 10000:1, as the
+// xisf Rust crate bounds them, crates/xisf-core/src/codec.rs:35): a
+// header claiming more is corrupt, and believing it would allocate up to
+// the claim before decoding a byte.
+var expansion = map[string]int64{"zlib": 2048, "lz4": 512, "lz4hc": 512, "zstd": 65536}
 
 // xisfImage is the first Image element of an XISF header (XISF 1.0
 // specification, §8.5 and §11.5): what is needed to decode its pixels,
@@ -39,6 +52,7 @@ type xisfImage struct {
 	Subblocks    string `xml:"subblocks,attr"`
 	ByteOrder    string `xml:"byteOrder,attr"`
 	PixelStorage string `xml:"pixelStorage,attr"`
+	Checksum     string `xml:"checksum,attr"`
 	Keywords     []struct {
 		Name    string `xml:"name,attr"`
 		Value   string `xml:"value,attr"`
@@ -62,7 +76,13 @@ func openXISF(path string) (source, error) {
 		return source{}, err
 	}
 	var lead [16]byte
-	if _, err := io.ReadFull(f, lead[:]); err != nil || string(lead[:8]) != "XISF0100" {
+	fi, err := f.Stat()
+	if err == nil {
+		_, err = io.ReadFull(f, lead[:])
+	}
+	// Every size in the header is checked against the file's: a corrupt
+	// one must fail to decode, not allocate or slice past it.
+	if err != nil || string(lead[:8]) != "XISF0100" || int64(binary.LittleEndian.Uint32(lead[8:12])) > fi.Size()-16 {
 		f.Close()
 
 		return source{}, fmt.Errorf("%w: %s", ErrXISF, path)
@@ -103,6 +123,11 @@ func openXISF(path string) (source, error) {
 
 		return source{}, fmt.Errorf("%w: sample format %q", ErrXISFData, im.SampleFormat)
 	}
+	if float64(w)*float64(h)*float64(ch)*float64(abs(bitpix)/8) > float64(fi.Size())*float64(expansion["zstd"]) {
+		f.Close()
+
+		return source{}, fmt.Errorf("%w: geometry %q larger than the file can hold", ErrXISFData, im.Geometry)
+	}
 	cards := make([]fitsio.Card, 0, len(im.Keywords)+1)
 	// Capture software (N.I.N.A.) writes FITS keywords into XISF subs;
 	// an image with none is a processed one (PixInsight drops them along
@@ -121,7 +146,7 @@ func openXISF(path string) (source, error) {
 		axes = append(axes, ch)
 	}
 	read := func() ([]float32, int, error) {
-		raw, err := xisfBlock(f, im, w*h*ch*abs(bitpix)/8)
+		raw, err := xisfBlock(f, fi.Size(), im, w*h*ch*abs(bitpix)/8)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -135,25 +160,30 @@ func openXISF(path string) (source, error) {
 // xisfBlock reads the image's attachment and undoes its compression and
 // byte shuffling. Inline and embedded data blocks are not supported:
 // PixInsight attaches images.
-func xisfBlock(f *os.File, im xisfImage, size int) ([]byte, error) {
+func xisfBlock(f *os.File, fileSize int64, im xisfImage, size int) ([]byte, error) {
 	var pos, n int64
-	if c, _ := fmt.Sscanf(im.Location, "attachment:%d:%d", &pos, &n); c != 2 {
+	if c, _ := fmt.Sscanf(im.Location, "attachment:%d:%d", &pos, &n); c != 2 || pos < 0 || n < 0 || pos > fileSize || n > fileSize-pos {
 		return nil, fmt.Errorf("%w: location %q", ErrXISFData, im.Location)
+	}
+	if im.Compression == "" && n != int64(size) {
+		return nil, errShortRead
 	}
 	buf := make([]byte, n)
 	if _, err := f.ReadAt(buf, pos); err != nil {
 		return nil, err
 	}
+	if err := verify(buf, im.Checksum); err != nil {
+		return nil, err
+	}
 	if im.Compression == "" {
-		if len(buf) != size {
-			return nil, errShortRead
-		}
-
 		return buf, nil
 	}
 	// codec[+sh]:uncompressed-size[:item-size]
 	parts := strings.Split(im.Compression, ":")
 	codec, shuffle := strings.CutSuffix(parts[0], "+sh")
+	if r, ok := expansion[codec]; !ok || int64(size) > n*r {
+		return nil, fmt.Errorf("%w: compression %q for %d bytes", ErrXISFData, im.Compression, n)
+	}
 	item := 1
 	if shuffle && len(parts) > 2 {
 		item, _ = strconv.Atoi(parts[2])
@@ -164,7 +194,7 @@ func xisfBlock(f *os.File, im xisfImage, size int) ([]byte, error) {
 		blocks = blocks[:0]
 		for b := range strings.SplitSeq(im.Subblocks, ":") {
 			var c, u int
-			if k, _ := fmt.Sscanf(b, "%d,%d", &c, &u); k != 2 {
+			if k, _ := fmt.Sscanf(b, "%d,%d", &c, &u); k != 2 || c < 0 || u < 0 || u > size {
 				return nil, fmt.Errorf("%w: subblocks %q", ErrXISFData, im.Subblocks)
 			}
 			blocks = append(blocks, [2]int{c, u})
@@ -189,6 +219,42 @@ func xisfBlock(f *os.File, im xisfImage, size int) ([]byte, error) {
 	}
 
 	return out, nil
+}
+
+// verify checks a block as stored (still compressed) against its checksum
+// attribute, "algorithm:digest" in hex. A mismatch is a damaged file, which
+// may still decode into wrong pixels; an unknown algorithm cannot be
+// checked, so it fails too, as in the xisf Rust crate (block.rs:384).
+func verify(block []byte, checksum string) error {
+	if checksum == "" {
+		return nil
+	}
+	alg, want, _ := strings.Cut(checksum, ":")
+	var sum []byte
+	switch alg {
+	case "sha-1", "sha1":
+		s := sha1.Sum(block) //nolint:gosec // the file's choice, an integrity check
+		sum = s[:]
+	case "sha-256", "sha256":
+		s := sha256.Sum256(block)
+		sum = s[:]
+	case "sha-512", "sha512":
+		s := sha512.Sum512(block)
+		sum = s[:]
+	case "sha3-256":
+		s := sha3.Sum256(block)
+		sum = s[:]
+	case "sha3-512":
+		s := sha3.Sum512(block)
+		sum = s[:]
+	default:
+		return fmt.Errorf("%w: checksum %q", ErrXISFData, checksum)
+	}
+	if !strings.EqualFold(hex.EncodeToString(sum), want) {
+		return fmt.Errorf("%w (%s)", ErrChecksum, alg)
+	}
+
+	return nil
 }
 
 // zstdDec is shared: DecodeAll is safe for concurrent use.

@@ -318,6 +318,7 @@ func TestSubLength(t *testing.T) {
 func TestCalibration(t *testing.T) {
 	light := analyze.Result{}
 	light.Exp, light.Setting, light.Temp, light.Filter, light.Size = 20, 200, 15, "Nebula", [2]int{3056, 2048}
+	light.Offset, light.Readout = 30, "High Gain"
 	frames := []Frame{{Result: light}, {Result: light}}
 	cal := func(typ string, exp, setting, temp float64, filter string, w int) Calib {
 		return Calib{Image: fits.Image{Meta: fits.Meta{
@@ -331,11 +332,15 @@ func TestCalibration(t *testing.T) {
 		cal(fits.Flat, 0.0589399, 23, 27, "Clear", 3000),
 		cal(fits.DarkFlat, 0.1, 50, 34, "", 3000), // matches the flats' size, not their gain or exposure
 	}
+	for i := range 2 { // the bias matches the lights' offset and readout mode, the dark neither
+		calib[i].Image.Meta.Offset, calib[i].Image.Meta.Readout = 30, "High Gain"
+	}
+	calib[2].Image.Meta.Offset, calib[2].Image.Meta.Readout = 10, "Low Noise"
 	var b bytes.Buffer
 	Calibration(&b, frames, calib, math.NaN(), nil)
 	for _, want := range []string{
 		"2, 1 distinct, 9-frame master  2025-10-17  0.001",
-		"none at gain/ISO 200; none at 20 s, so scaled by exposure; 15.4 °C warmer",
+		"none at gain/ISO 200; none at offset 30; none in readout mode High Gain; none at 20 s, so scaled by exposure; 15.4 °C warmer",
 		"0.0589", "size 3000 × 2048; none for filter Nebula",
 		"size 3000 × 2048; none at the flats' gain/ISO 23; none at the flats' 0.0589 s; 7.0 °C warmer than the flats",
 	} {
@@ -554,5 +559,72 @@ func TestTiltClass(t *testing.T) {
 		if got := tilt(f); !strings.Contains(got, "% "+c.want+" (") {
 			t.Errorf("corner %.2f: %q, want %s", c.corner, got, c.want)
 		}
+	}
+}
+
+// TestCommonDir: the deepest directory holding every frame, matched on
+// whole path components ("/s/ab" is not inside "/s/a").
+func TestCommonDir(t *testing.T) {
+	for _, c := range []struct {
+		want  string
+		paths []string
+	}{
+		{want: "."},
+		{paths: []string{"/s/a/f1.fits"}, want: "/s/a"},
+		{paths: []string{"/s/a/f1.fits", "/s/a/f2.fits"}, want: "/s/a"},
+		{paths: []string{"/s/a/f1.fits", "/s/ab/f2.fits"}, want: "/s"},
+		{paths: []string{"/s/a/x/f1.fits", "/t/f2.fits"}, want: "/"},
+	} {
+		frames := make([]Frame, len(c.paths))
+		for i, p := range c.paths {
+			frames[i].Path = p
+		}
+		if got := commonDir(frames); got != c.want {
+			t.Errorf("commonDir(%v) = %q, want %q", c.paths, got, c.want)
+		}
+	}
+}
+
+// TestTable: paths print relative to their common directory, unknown
+// values as "-", and flags comma-joined.
+func TestTable(t *testing.T) {
+	r := analyze.Result{FWHM: 3.25, Stars: 120, Ecc: math.NaN()}
+	r.Date, r.Filter = "2026-10-02T21:00:00", "L"
+	frames := []Frame{
+		{Path: "/s/a/f1.fits", Result: r, Flags: []string{"FWHM px", "Stars"}},
+		{Path: "/s/b/f2.fits", Result: analyze.Result{FWHM: math.NaN()}},
+	}
+	var b bytes.Buffer
+	Table(&b, frames)
+	lines := strings.Split(b.String(), "\n")
+	if lines[0] != "Directory: /s" || !strings.HasPrefix(lines[2], "File ") {
+		t.Fatalf("header:\n%s", b.String())
+	}
+	if f := strings.Fields(lines[3]); f[0] != "a/f1.fits" || f[1] != r.Date || f[2] != "L" || f[len(f)-1] != "px,Stars" || !strings.Contains(lines[3], "3.25") {
+		t.Errorf("row 1: %q", lines[3])
+	}
+	if f := strings.Fields(lines[4]); f[0] != "b/f2.fits" || f[1] != "-" || f[2] != "-" {
+		t.Errorf("row 2: %q", lines[4])
+	}
+}
+
+// TestAutocrop: of a 200 × 100 frame and its copy turned 90°, only the
+// central 100 × 100 square has both, so WBPP's autocrop keeps it.
+func TestAutocrop(t *testing.T) {
+	s := 1.0 / 3600
+	ref := fits.WCS{CD: [2][2]float64{{-s, 0}, {0, s}}, CRVAL: [2]float64{10, 20}, CRPIX: [2]float64{100.5, 50.5}, NAXIS: [2]int{200, 100}, OK: true}
+	turned := ref
+	turned.CD = [2][2]float64{{0, s}, {s, 0}}
+	frames := make([]Frame, 2)
+	frames[0].Result.WCS, frames[1].Result.WCS = ref, turned
+	var b bytes.Buffer
+	autocrop(&b, frames)
+	if !strings.Contains(b.String(), "keeps about 100 × 100 px, 50% of the reference frame") {
+		t.Errorf("autocrop: %q", b.String())
+	}
+	b.Reset()
+	autocrop(&b, frames[:1])
+	if b.Len() != 0 {
+		t.Errorf("one solved frame: %q", b.String())
 	}
 }

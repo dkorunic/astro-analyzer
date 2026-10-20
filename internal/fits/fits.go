@@ -10,6 +10,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -84,6 +85,7 @@ type Meta struct {
 	// Pier is the mount's pier side (PIERSIDE: EAST or WEST, as SGP and
 	// ASIAIR write it), "" if absent. N.I.N.A. does not write it.
 	Pier           string
+	Readout        string
 	WCS            WCS    // plate solution, for drizzle dither analysis
 	Size           [2]int // sensor pixels, before Bayer binning
 	Exp, Temp, Alt float64
@@ -105,9 +107,16 @@ type Meta struct {
 	// cover in %, and the cloud sensor's sky temperature in °C; NaN if
 	// absent.
 	Ambient, DewPoint, Humidity, Cloud, SkyTemp float64
-	Aperture, FocalLen                          float64 // mm
-	Lat, Lon                                    float64 // site, degrees, east positive
-	RA, Dec                                     float64 // target (frame centre), degrees
+	// Wind is the station's gust speed (WINDGUST), else its mean speed
+	// (WINDSPD), km/h as N.I.N.A. writes them; NaN if absent.
+	Wind float64
+	// Offset (OFFSET) and Readout (READOUTM) are the camera's offset and
+	// readout mode as N.I.N.A. writes them: NaN and "" if absent. Bias
+	// and darks only match lights taken at the same ones.
+	Offset             float64
+	Aperture, FocalLen float64 // mm
+	Lat, Lon           float64 // site, degrees, east positive
+	RA, Dec            float64 // target (frame centre), degrees
 	// Stack is how many frames an integrated image combines (NCOMBINE,
 	// NSTACK, STACKCNT); NaN for a single exposure. Celestron Origin's bias
 	// and dark files are 9-frame masters.
@@ -402,7 +411,13 @@ func openFITS(path string) (source, error) {
 	if err != nil {
 		return source{}, err
 	}
-	f, err := fitsio.Open(bufio.NewReader(fh))
+	var size int64 = math.MaxInt64
+	if fi, err := fh.Stat(); err == nil {
+		size = fi.Size()
+	}
+	// The limit lets the fitsio fork refuse a corrupt header's sizes
+	// beyond the file instead of allocating them.
+	f, err := fitsio.Open(&io.LimitedReader{R: bufio.NewReader(fh), N: size})
 	if err != nil {
 		fh.Close()
 
@@ -420,7 +435,7 @@ func openFITS(path string) (source, error) {
 			}
 		case *fitsio.Table:
 			if c := hdu.Header().Get("ZIMAGE"); c != nil && c.Value == true {
-				src, err := openTiled(hdu)
+				src, err := openTiled(hdu, size)
 				if err != nil {
 					done()
 
@@ -647,6 +662,9 @@ func meta(hdr *fitsio.Header, axes []int, typ string) Meta {
 		Humidity:  first(hdr, "HUMIDITY"),
 		Cloud:     first(hdr, "CLOUDCVR"),
 		SkyTemp:   first(hdr, "SKYTEMP"),
+		Wind:      first(hdr, "WINDGUST", "WINDSPD"),
+		Offset:    first(hdr, "OFFSET"),
+		Readout:   str(hdr, "READOUTM"),
 		Pier:      strings.ToUpper(str(hdr, "PIERSIDE")),
 		Focus:     first(hdr, "FOCUSPOS", "FOCPOS"),
 		FocusTemp: first(hdr, "FOCTEMP", "FOCUSTEM"),

@@ -81,8 +81,8 @@ FITS keywords at all) are skipped and counted on stderr.
 | Format | Extensions | Notes |
 |---|---|---|
 | FITS | `.fits`, `.fit`, `.fts` | The first image HDU |
-| fpack | `.fz` (`.fits.fz`) | Tile-compressed FITS: `RICE_1`, `GZIP_1`, `GZIP_2` and `NOCOMPRESS`, quantized floats restored with their subtractive dithering. Not `HCOMPRESS_1` or `PLIO_1` |
-| XISF | `.xisf` | PixInsight's format, uncompressed or `zlib`, `lz4`, `lz4hc` or `zstd`, with or without byte shuffling. Its FITS keywords are the header; a 2×2 `ColorFilterArray` gives `BAYERPAT`. Rows are read top first, as PixInsight reads FITS |
+| fpack | `.fz` (`.fits.fz`) | Tile-compressed FITS, every `ZCMPTYPE`: `RICE_1`, `GZIP_1`, `GZIP_2`, `NOCOMPRESS`, `HCOMPRESS_1` (lossless or lossy, with `SMOOTH`) and `PLIO_1`, quantized floats restored with their subtractive dithering bit for bit as cfitsio does, lossless floats and tiles cfitsio stored uncompressed or gzipped read as stored |
+| XISF | `.xisf` | PixInsight's format, uncompressed or `zlib`, `lz4`, `lz4hc` or `zstd`, with or without byte shuffling; a block's `checksum` (SHA-1, SHA-2 or SHA-3) is verified. Its FITS keywords are the header; a 2×2 `ColorFilterArray` gives `BAYERPAT`. Rows are read top first, as PixInsight reads FITS |
 | TIFF | `.tif`, `.tiff` | 8- and 16-bit grey or RGB (no float samples). A FITS header in `ImageDescription`, as ASTAP saves one, is read. Only when named: directory searches skip TIFF, as in a session folder it is usually a processed export |
 | Camera RAW | `.cr2`, `.nef`, `.arw`, `.raf`, `.orf`, `.rw2`, `.pef`, `.dng` and more | Through `dcraw` on the `PATH`, as ASTAP does: the undemosaiced mosaic (`-D -4 -t 0`) and its timestamp, camera, ISO, exposure and CFA pattern. dcraw 9.28 does not read Canon CR3. DSLR frames carry no frame type, so calibration frames read as lights |
 
@@ -164,10 +164,12 @@ which ASTAP measures photometrically and N.I.N.A. reads from a meter, or
 Sky mag against.
 
 When the directories hold calibration frames, their headers are checked
-against the lights': gain or ISO for bias and darks, dark exposure and a
-sensor temperature 5 °C or more away, the flat's filter, and any frame
-size the lights lack. Dark flats are held to the flats' gain, exposure and
-temperature instead (as ASTAP checks them).
+against the lights': gain or ISO, offset (`OFFSET`) and readout mode
+(`READOUTM`, as N.I.N.A. writes them) for bias and darks, dark exposure
+and a sensor temperature 5 °C or more away, the flat's filter, and any
+frame size the lights lack. Dark flats are held to the flats' gain,
+offset, readout mode, exposure and temperature instead (as ASTAP checks
+them).
 Files sharing one `DATE-OBS` are copies of one capture, as the Origin saves
 its masters. Then what their pixels show:
 
@@ -233,6 +235,9 @@ summary turns the session into N.I.N.A. sequencer settings:
 - **Autofocus After Temperature Change**: FWHM growth per °C within runs
   whose focuser temperature moved at least 0.5 °C, and the step that grows
   FWHM 5% (N.I.N.A.'s default HFR trigger; its own default is 5 °C).
+- **Autofocus After Time** and **After Exposures**: the same growth per
+  hour (from `DATE-OBS`), and the time, and frames at the session's
+  cadence, that grow FWHM 5% (N.I.N.A.'s defaults: 30 min, 5 exposures).
 - **Autofocus After HFR Increase**: N.I.N.A.'s trigger replayed at its
   defaults (5% over a 10-frame least-squares trend, against the lowest HFR
   since the autofocus) on the HFR column of each run, with how many runs it
@@ -240,7 +245,10 @@ summary turns the session into N.I.N.A. sequencer settings:
 
 A cloud sensor's `CLOUDCVR` (or `SKYTEMP` over `AMBTEMP`, which a clear sky
 keeps far below) that rises as the star count falls (rank correlation under
-−0.5) gets a line saying low star counts are cloud.
+−0.5) gets a line saying low star counts are cloud. Likewise a weather
+station's wind (`WINDGUST`, else `WINDSPD`) that rises with eccentricity
+(rank correlation 0.5 or more) gets a line saying elongated stars are wind
+shake, not guiding or tilt.
 
 
 ```

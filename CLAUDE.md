@@ -36,13 +36,13 @@ Dependencies only point downward in this list:
 | Package | Role |
 |---|---|
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
-| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and camera presets (`subs.go`), chip QE, colour response and dark current, sky brightness and Bortle class (`sky.go`), acquisition checks and N.I.N.A. trigger settings: focus temperature slope, HFR/temperature triggers, cooler, dew, cloud, dither cadence, pointing drift, meridian flips (`acquisition.go`), CSV/JSON |
+| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and camera presets (`subs.go`), chip QE, colour response and dark current, sky brightness and Bortle class (`sky.go`), acquisition checks and N.I.N.A. trigger settings: focus temperature slope, HFR/temperature/time triggers, cooler, dew, cloud, wind, dither cadence, pointing drift, meridian flips (`acquisition.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
 | `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, ASTAP HFD (`hfd.go`), N.I.N.A. HFR (`hfr.go`), medians, PSF SNR/PSFSW/SNRW, gradient, hot level, trails (`trails.go`), raw pixel noise, Sun/Moon, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
 | `internal/sky` | Low-precision Sun and Moon positions (Astronomical Almanac), altitude, illumination |
 | `internal/stats` | Median/MAD, outlier rule, Spearman, Chauvenet (RCR), sigma-clipped sky, wavelet MRS noise + background map, sky gradient plane, M* and two-sided scale (PSFSW, SNRW) |
-| `internal/fits` | Loading behind `source` (header + sample reader): FITS, fpack tiles (`fpack.go`: Rice, GZIP_1/2, dithered floats), XISF (`xisf.go`: zlib/lz4/zstd via klauspost, own LZ4 block decoder), TIFF (`tiff.go`, x/image), RAW (`raw.go`, dcraw); fixtures in `testdata` from independent writers (`gen.py`). FITS loading, BZERO/BSCALE, frame type, Origin ADU step and gain fixes, Bayer 2×2 binning and CFA sky, saturation mask, header metadata, TAN WCS, calibration pixel stats (`CalStats`), `PairNoise`/`PairGain` |
+| `internal/fits` | Loading behind `source` (header + sample reader): FITS, fpack tiles (`fpack.go`: Rice, GZIP_1/2, NOCOMPRESS, dithered and lossless floats; HCOMPRESS_1 and PLIO_1 ported from cfitsio in `cfitsio.go`, which keeps NASA's notice), XISF (`xisf.go`: zlib/lz4/zstd via klauspost, own LZ4 block decoder), TIFF (`tiff.go`, x/image), RAW (`raw.go`, dcraw); fixtures in `testdata` from independent writers (`gen.py`; libXISF, fits-well and fitsy corpora in subdirectories, each with a README). FITS loading, BZERO/BSCALE, frame type, Origin ADU step and gain fixes, Bayer 2×2 binning and CFA sky, saturation mask, header metadata, TAN WCS, calibration pixel stats (`CalStats`), `PairNoise`/`PairGain` |
 | `internal/synth` | Test-only helpers: synthetic star fields and a FITS writer |
 
 To add a per-frame metric: add the field to `analyze.Result`, compute it in
@@ -99,6 +99,20 @@ by the default run.
 
 ## Gotchas
 
+- `fitsio` is forked in `third_party/fitsio` (`replace` in go.mod,
+  `FORK.md`): upstream panics or allocates what a corrupt header claims.
+  `openFITS` passes an `*io.LimitedReader` of the file size so the fork
+  can refuse sizes past the file. `task fmt` leaves `third_party` alone;
+  run the fork's tests with `go test -vet=off ./...` in its directory.
+- Quantized fpack floats match cfitsio bit for bit (`TestReferenceDecodes`):
+  every pixel, null or not, takes the next dither random; the random
+  table is float32; `float64(v*scale) + zero` stops Go fusing the
+  multiply-add on arm64; tiles in `GZIP_COMPRESSED_DATA` or
+  `UNCOMPRESSED_DATA` hold raw floats and are not dequantized.
+- HCOMPRESS_1 uses cfitsio's 64-bit decoder for every BITPIX
+  (`TestHcompressWide`: sums past 32 bits). astropy writes `SMOOTH` as a
+  logical (`ZVAL2 = T`), fpack as a number. PLIO_1 tiles are 16-bit
+  words (`1PI`): scanned as `[]int16`, a `[]byte` target gets half.
 - `fitsio` (codeberg.org/astrogo/fitsio) does **not** apply BZERO/BSCALE, and
   `Image.Read` panics unless the destination slice already has capacity for
   every pixel (it only calls `SetLen`).
@@ -219,7 +233,10 @@ by the default run.
   cards are dropped and samples arrive physical. XISF, TIFF and RAW rows
   stay in stored order (top first), as PixInsight reads FITS, so a FITS
   file and its XISF copy measure byte for byte the same; checked with
-  every codec and fpack type on real Origin frames.
+  every codec and fpack type on real Origin frames. XISF header sizes
+  are numbers, not facts: attachments are bounded by the file and
+  decompressed sizes by each codec's best ratio (`expansion`), so a
+  corrupt header fails instead of panicking (`TestXISFHostile`).
 - PixInsight calibration masters are [0, 1] floats: `toADU` multiplies
   calibration frames (not lights) by 65535, else read noise came out
   10⁻⁶ e⁻. WBPP's masters are built from the session's own files, so
@@ -240,7 +257,7 @@ by the default run.
   curve-of-growth radius averaged with a **mean** after a 1.5σ cut on star
   radius, unlike every other column's median: that is what its image
   history and Autofocus After HFR Increase use. Trigger defaults (5%, 10
-  frames, 5 °C, 10′) are constants in `acquisition.go`. NINA writes no
+  frames, 5 °C, 30 min, 5 exposures, 10′) are constants in `acquisition.go`. NINA writes no
   `PIERSIDE`; flips are 180° ± 15° rotation jumps, counted only when the
   field otherwise holds within 5° (equatorial), so alt-az rotation never
   reads as a flip.

@@ -44,13 +44,13 @@ const (
 )
 
 // headers summarises one set of frames: distinct exposures, gain or ISO
-// settings, filters and DATE-OBS values, the median sensor temperature and
-// frame sizes.
+// settings, offsets, readout modes, filters and DATE-OBS values, the
+// median sensor temperature and frame sizes.
 type headers struct {
-	exps, settings, stacks []float64
-	filters, dates         []string
-	sizes                  [][2]int
-	temp                   float64
+	exps, settings, stacks, offsets []float64
+	filters, dates, readouts        []string
+	sizes                           [][2]int
+	temp                            float64
 }
 
 func summarise(ms []fits.Meta) headers {
@@ -58,11 +58,12 @@ func summarise(ms []fits.Meta) headers {
 	temps := make([]float64, 0, len(ms))
 	for _, m := range ms {
 		h.exps, h.settings, h.stacks = appendKnown(h.exps, m.Exp), appendKnown(h.settings, m.Setting), appendKnown(h.stacks, m.Stack)
+		h.offsets = appendKnown(h.offsets, m.Offset)
 		temps = append(temps, m.Temp)
 		for _, add := range []struct {
 			to *[]string
 			v  string
-		}{{to: &h.filters, v: m.Filter}, {to: &h.dates, v: m.Date}} {
+		}{{to: &h.filters, v: m.Filter}, {to: &h.dates, v: m.Date}, {to: &h.readouts, v: m.Readout}} {
 			if add.v != "" && !slices.Contains(*add.to, add.v) {
 				*add.to = append(*add.to, add.v)
 			}
@@ -203,6 +204,12 @@ func issues(t string, c, light, flat headers) []string {
 	}
 	if t == fits.Bias || t == fits.Dark || t == fits.DarkFlat {
 		missing(c.settings, ref.settings, "none at "+whose+"gain/ISO %g")
+		missing(c.offsets, ref.offsets, "none at "+whose+"offset %g")
+		for _, m := range ref.readouts {
+			if len(c.readouts) > 0 && !slices.Contains(c.readouts, m) {
+				out = append(out, "none in "+whose+"readout mode "+m)
+			}
+		}
 	}
 	switch t {
 	case fits.Dark:

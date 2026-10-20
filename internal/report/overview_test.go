@@ -81,3 +81,27 @@ func TestEquipmentCFA(t *testing.T) {
 		t.Errorf("flipped equipment = %q", s)
 	}
 }
+
+// TestCoverageSection: the 90° pair of TestCoverage prints its overlap;
+// a flagged or unsolved frame is not stacked, so it is left out.
+func TestCoverageSection(t *testing.T) {
+	s := 1.0 / 3600
+	ref := fits.WCS{CD: [2][2]float64{{-s, 0}, {0, s}}, CRVAL: [2]float64{10, 20}, CRPIX: [2]float64{100.5, 50.5}, NAXIS: [2]int{200, 100}, OK: true}
+	turned := ref
+	turned.CD = [2][2]float64{{0, s}, {s, 0}}
+	frames := make([]Frame, 4)
+	frames[0].Result.WCS, frames[1].Result.WCS, frames[2].Result.WCS = ref, turned, turned
+	frames[2].Flags = []string{"FWHM px"}
+	var b bytes.Buffer
+	Coverage(&b, frames)
+	for _, want := range []string{"Stack coverage: 2 plate-solved frames, field rotates 90°", "every frame over 50% of the reference frame", "half over 100%"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, b.String())
+		}
+	}
+	b.Reset()
+	Coverage(&b, frames[:1])
+	if b.Len() != 0 {
+		t.Errorf("one solved frame printed:\n%s", b.String())
+	}
+}

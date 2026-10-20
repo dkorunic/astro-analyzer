@@ -87,3 +87,22 @@ func TestChipOf(t *testing.T) {
 		}
 	}
 }
+
+// TestSkyBrightness sets SkyMag per frame from TestSkyMag's frame, and a
+// read noise given overrides the preset's: more of the noise is then
+// read noise, less is sky, so the sky reads darker.
+func TestSkyBrightness(t *testing.T) {
+	var r analyze.Result
+	r.Camera, r.Setting, r.CFA, r.Bayer = "Origin678C-x", 1000, true, "GBRG"
+	r.Aperture, r.Plate, r.Exp, r.Temp = 152, 1.23, 15, math.NaN()
+	r.NoiseE = math.Sqrt(2*15 + 0.97*0.97)
+	frames := []Frame{{Result: r}, {Result: analyze.Result{}}}
+	SkyBrightness(frames, 0)
+	if !(math.Abs(frames[0].SkyMag-19.991) < 0.001) || !math.IsNaN(frames[1].SkyMag) {
+		t.Errorf("SkyMag = %v, %v; want 19.991, NaN", frames[0].SkyMag, frames[1].SkyMag)
+	}
+	SkyBrightness(frames[:1], 3)
+	if !(frames[0].SkyMag > 20.1) {
+		t.Errorf("SkyMag with 3 e⁻ read noise = %v, want over 20.1", frames[0].SkyMag)
+	}
+}

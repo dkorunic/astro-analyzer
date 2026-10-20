@@ -174,6 +174,14 @@ func TestThreshold(t *testing.T) {
 			}
 		}
 	}
+	// Subnormal products round to multiples of 2⁻¹⁰⁷⁴, far from a/s:
+	// a/s − 2 ulp still qualifies, so thresholdBelow has to step down.
+	for _, a := range []float64{1e-323, 1.5e-322} {
+		th := threshold(a, 0.01)
+		if !(a <= th*0.01) || a <= math.Nextafter(th, 0)*0.01 {
+			t.Errorf("threshold(%v, 0.01) = %v is not the least x with x·0.01 ≥ a", a, th)
+		}
+	}
 	if th := threshold(math.Inf(1), 0.2); !(th > math.MaxFloat64) {
 		t.Errorf("threshold(+Inf) = %v, want +Inf", th)
 	}

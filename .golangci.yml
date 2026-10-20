@@ -29,6 +29,9 @@ linters:
     - wsl
     - wsl_v5
   settings:
+    gomoddirectives:
+      # third_party/fitsio: a fork that fails on corrupt files (FORK.md).
+      replace-local: true
     ireturn:
       # The defaults plus type parameters: fetch.Cached[T] returns a T, not an interface.
       allow: [anon, error, empty, stdlib, generic]

@@ -23,8 +23,14 @@ const (
 	ninaHFRAmount  = 5  // Autofocus/AutofocusAfterHFRIncreaseTrigger.cs:86, %
 	ninaHFRSamples = 10 // ibid. :90, frames in the trend
 	ninaTempAmount = 5  // Autofocus/AutofocusAfterTemperatureChangeTrigger.cs:83, °C
+	ninaAFMinutes  = 30 // Autofocus/AutofocusAfterTimeTrigger.cs:86, min
+	ninaAFFrames   = 5  // Autofocus/AutofocusAfterExposures.cs:83, light frames
 	ninaDrift      = 10 // Platesolving/CenterAfterDriftTrigger.cs:106, arcmin
 )
+
+// windShake is the smallest rank correlation between wind and
+// eccentricity reported. ponytail: as cloud's −0.5, a round number.
+const windShake = 0.5
 
 const (
 	// coolerTol is how far the sensor may sit from the cooler's setpoint.
@@ -148,6 +154,43 @@ func tempTrigger(frames []Frame) string {
 
 	return fmt.Sprintf("FWHM grows %.1f%%/°C at a fixed focuser position (median of %d runs): Autofocus After Temperature Change at %.1f °C keeps growth under %d%% (N.I.N.A. default %d °C)",
 		100*rate, len(rates), ninaHFRAmount/100.0/rate, ninaHFRAmount, ninaTempAmount)
+}
+
+// timeTrigger is tempTrigger against the clock: the median, over runs at
+// one focuser position, of FWHM growth per hour between the medians of the
+// first and last refocusEnds frames, and the time, and frames at the
+// session's cadence, that grow FWHM by N.I.N.A.'s default HFR trigger: the
+// thresholds for its Autofocus After Time and After Exposures. "" with
+// fewer than 3 such runs or no growth.
+//
+// ponytail: as in refocus, seeing and altitude changes count as drift.
+func timeTrigger(frames []Frame) string {
+	var rates, cadence []float64
+	for _, run := range focusRuns(frames) {
+		r := frames[run.start:run.end]
+		if len(r) < refocusRun {
+			continue
+		}
+		// The median times of the end frames, as frames run in time order.
+		a, b := refocusEnds/2, len(r)-1-refocusEnds/2
+		t0, t1 := r[a].Result.Time, r[b].Result.Time
+		if t0.IsZero() || !t1.After(t0) {
+			continue
+		}
+		h := t1.Sub(t0).Hours()
+		f0, f1 := ends(r, fwhmOf)
+		if g := (f1/f0 - 1) / h; !math.IsNaN(g) {
+			rates, cadence = append(rates, g), append(cadence, 60*h/float64(b-a))
+		}
+	}
+	rate := stats.MedianOf(rates)
+	if len(rates) < 3 || !(rate > 0) {
+		return ""
+	}
+	minutes := 60 * ninaHFRAmount / 100.0 / rate
+
+	return fmt.Sprintf("FWHM grows %.1f%%/h at a fixed focuser position (median of %d runs): Autofocus After Time at %.0f min, or After Exposures at %d, keeps growth under %d%% (N.I.N.A. defaults %d min, %d)",
+		100*rate, len(rates), minutes, max(1, int(minutes/stats.MedianOf(cadence))), ninaHFRAmount, ninaAFMinutes, ninaAFFrames)
 }
 
 // hfrTrigger replays N.I.N.A.'s Autofocus After HFR Increase at its
@@ -315,6 +358,25 @@ func cloud(frames []Frame) string {
 	}
 
 	return fmt.Sprintf("Star count falls as the cloud sensor reads cloudier (%s, rank correlation %+.2f): low star counts are cloud, not focus or seeing", src, r)
+}
+
+// wind notes when stars elongate as the wind rises (WINDGUST, else
+// WINDSPD): gusts shake the tube along one axis during an exposure. ""
+// under 8 frames or a rank correlation under windShake.
+func wind(frames []Frame) string {
+	ecc, speed := make([]float64, len(frames)), make([]float64, len(frames))
+	var known []float64
+	for i, f := range frames {
+		ecc[i], speed[i] = f.Result.Ecc, f.Result.Wind
+		known = appendKnown(known, f.Result.Wind)
+	}
+	r, n := stats.Spearman(ecc, speed)
+	if n < 8 || !(r >= windShake) {
+		return ""
+	}
+
+	return fmt.Sprintf("Eccentricity rises with the wind (%.0f–%.0f km/h, rank correlation %+.2f over %d frames): elongated stars are wind shake, not guiding or tilt",
+		slices.Min(known), slices.Max(known), r, n)
 }
 
 // solvedFrame is a plate-solved frame with a time, by index into frames.

@@ -128,6 +128,43 @@ func TestDewPoint(t *testing.T) {
 	}
 }
 
+// TestTimeTrigger: frames 61 s apart, so the medians of each run's first
+// and last 3 frames lie 305 s apart while FWHM grows 4.95%: 58.4%/h, so
+// 5% takes 5.1 min, 5 frames.
+func TestTimeTrigger(t *testing.T) {
+	frames := focusSession()
+	start := time.Date(2026, 10, 2, 21, 0, 0, 0, time.UTC)
+	for i := range frames {
+		frames[i].Result.Time = start.Add(time.Duration(61*i) * time.Second)
+	}
+	if s := timeTrigger(frames); !strings.Contains(s, "grows 58.4%/h") || !strings.Contains(s, "After Time at 5 min, or After Exposures at 5,") {
+		t.Errorf("timeTrigger: %q", s)
+	}
+	if s := timeTrigger(focusSession()); s != "" { // no DATE-OBS
+		t.Errorf("timeTrigger without times: %q", s)
+	}
+}
+
+func TestWind(t *testing.T) {
+	var frames []Frame
+	for i := range 10 {
+		r := analyze.Result{
+			Ecc:  0.4 + 0.02*float64(i),
+			Wind: 5 + 2*float64(i),
+		}
+		frames = append(frames, Frame{Result: r})
+	}
+	if s := wind(frames); !strings.Contains(s, "(5–23 km/h, rank correlation +1.00 over 10 frames)") {
+		t.Errorf("wind: %q", s)
+	}
+	for i := range frames {
+		frames[i].Result.Wind = math.NaN()
+	}
+	if s := wind(frames); s != "" {
+		t.Errorf("wind without WINDGUST: %q", s)
+	}
+}
+
 func TestCloud(t *testing.T) {
 	var frames []Frame
 	for i := range 10 {

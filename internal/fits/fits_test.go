@@ -67,6 +67,10 @@ func TestLoad(t *testing.T) {
 		fitsio.Card{Name: "CLOUDCVR", Value: 12.0},
 		fitsio.Card{Name: "SKYTEMP", Value: -21.0},
 		fitsio.Card{Name: "PIERSIDE", Value: "West"},
+		fitsio.Card{Name: "WINDSPD", Value: 7.2},
+		fitsio.Card{Name: "WINDGUST", Value: 18.0}, // preferred over WINDSPD
+		fitsio.Card{Name: "OFFSET", Value: 30},
+		fitsio.Card{Name: "READOUTM", Value: "High Gain   "},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +94,9 @@ func TestLoad(t *testing.T) {
 	}
 	if m.SetTemp != -10 || m.Ambient != 8.5 || m.DewPoint != 6 || m.Humidity != 87 || m.Cloud != 12 || m.SkyTemp != -21 || m.Pier != "WEST" {
 		t.Errorf("cooler/weather/pier = %v %v %v %v %v %v %q", m.SetTemp, m.Ambient, m.DewPoint, m.Humidity, m.Cloud, m.SkyTemp, m.Pier)
+	}
+	if m.Wind != 18 || m.Offset != 30 || m.Readout != "High Gain" {
+		t.Errorf("wind/offset/readout = %v %v %q", m.Wind, m.Offset, m.Readout)
 	}
 }
 
