@@ -211,4 +211,6 @@ by the default run.
   4×4 bin, which fragments a trail. The threshold uses the MRS noise, not
   the binned spread, which faint stars widen. Verified on the Western Veil
   session (413 frames, every frame inspected): both trails found, no false
-  ones on the filaments or cloud gradients.
+  ones on the filaments or cloud gradients. Blobs that fail the thin test
+  go to `hough`, which must explain 80% of the blob: a disc's chord through
+  its centre passes a peak test but not that one (`TestHough`).

@@ -13,8 +13,9 @@ import (
 )
 
 // TestTrails counts trails in a crowded synthetic field: none, one faint
-// one at 2σ per pixel broken by a gap (one line), and a bright second one
-// that does not cross it (crossing trails join into one blob: see trails).
+// one at 2σ per pixel broken by a gap (one line), a bright second one that
+// does not cross it, and a third crossing both, which the Hough transform
+// splits from the blob they join into.
 func TestTrails(t *testing.T) {
 	const w, h = 1200, 800
 	// line adds a trail of Gaussian profile (σ 1.5 px), amp per pixel at
@@ -51,5 +52,37 @@ func TestTrails(t *testing.T) {
 	line(pix, 1000, 600, 100, 0.5, 0) // meets the first at x = 1865, off the frame
 	if n := count(pix); n != 2 {
 		t.Errorf("two trails: %v, want 2", n)
+	}
+	line(pix, 1000, 600, 300, 2, 0)
+	if n := count(pix); n != 3 {
+		t.Errorf("a third trail crossing both: %v, want 3", n)
+	}
+}
+
+// TestHough splits an X of two 2-px-wide lines, 100 px long, into two
+// lines, and finds none in a filled disc of the same size: its chords
+// through the centre are not lines.
+func TestHough(t *testing.T) {
+	const bw = 200
+	var x, disc []int
+	for y := range bw {
+		for xx := range bw {
+			dx, dy := float64(xx-100), float64(y-100)
+			if math.Abs(dx) < 50 && math.Abs(dy) < 50 && (math.Abs(dx-dy) < 1.5 || math.Abs(dx+0.5*dy) < 1.5) {
+				x = append(x, y*bw+xx)
+			}
+			if dx*dx+dy*dy < 50*50 {
+				disc = append(disc, y*bw+xx)
+			}
+		}
+	}
+	if _, ok := segment(x, bw, 20); ok {
+		t.Fatal("the X passes as one thin segment: the test does not reach hough")
+	}
+	if got := hough(x, bw, 20); len(got) != 2 {
+		t.Errorf("X: %d lines, want 2", len(got))
+	}
+	if got := hough(disc, bw, 20); len(got) != 0 {
+		t.Errorf("disc: %d lines, want 0", len(got))
 	}
 }
