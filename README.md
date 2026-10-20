@@ -6,7 +6,7 @@
 
 A fast, local command-line tool that measures the quality of astrophotography
 subframes (FITS, fpack `.fz`, XISF, TIFF and camera RAW): star count, FWHM,
-ASTAP's HFD, eccentricity, SNR, sky background and
+ASTAP's HFD, N.I.N.A.'s HFR, eccentricity, SNR, sky background and
 noise, gradient, hot pixels and PixInsight's PSF SNR, PSF Signal Weight
 and SNRW frame weights. It flags bad frames, shows how a session evolved over the
 night (and warns of focus drift with temperature), sums integration time
@@ -18,8 +18,11 @@ maps how star shapes vary across the field to diagnose tilt, coma and
 tracking errors, and shows how much of a rotating stack keeps full depth.
 It also recommends PixInsight DrizzleIntegration settings (Scale and Drop
 shrink) from the measured sampling and dithering, predicts what
-PixInsight's WBPP will decide for the session, and compares sub lengths by
-read-noise cost and field-rotation smear.
+PixInsight's WBPP will decide for the session, compares sub lengths by
+read-noise cost and field-rotation smear, and turns the session into
+N.I.N.A. sequencer settings: focuser temperature compensation, autofocus
+triggers, dither cadence and re-centring on drift, with checks of the
+cooler, dew and cloud from the headers.
 
 Nothing is uploaded, converted or sent anywhere: frames are read, measured
 and reported locally. The measurement conventions follow PixInsight
@@ -118,9 +121,9 @@ astro-analyzer -reject ~/astro/M27 | xargs -I{} mv {} ~/astro/M27/rejected/
 One row per frame, sorted by `DATE-OBS`:
 
 ```
-File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  HFD px  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Sky mag  Hot     Trails  Flags
-Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    5.74    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  19.72    7436.3  0       
-Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    5.97    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  19.72    7427.5  0       Resid
+File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  HFD px  HFR px  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Sky mag  Hot     Trails  Flags
+Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    5.74    3.20    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  19.72    7436.3  0       
+Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    5.97    3.62    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  19.72    7427.5  0       Resid
 ```
 
 Then the equipment and integration time per filter, with one row per
@@ -145,6 +148,15 @@ Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 27 min unflagged, over 2 nigh
   2026-10-13  658     20:06–00:06  5.43     6165.6      20.08    6       74.9 ←    10%       0%       124°       0
   2026-10-16  682     20:11–00:20  4.76     6262.5      20.04    6       80.1 ←    33%       24%      108°       0
 ```
+
+Below the equipment line, two checks print when the headers allow them. A
+cooler's setpoint (`SET-TEMP`) is compared with `CCD-TEMP`: frames over
+1 °C off, as a cooler at full power on a warm night leaves them, no longer
+match darks taken at the setpoint. And with a weather station (`AMBTEMP`,
+plus `DEWPOINT` or `HUMIDITY`, from which the Magnus formula gives the dew
+point), frames taken with the air within 2 °C of its dew point are counted,
+with how many were flagged: optics radiating to a clear sky run colder than
+the air, so that is when dew forms.
 
 When the frames carry a sky brightness from the capture software (`SQM`,
 which ASTAP measures photometrically and N.I.N.A. reads from a meter, or
@@ -181,7 +193,10 @@ its masters. Then what their pixels show:
 - **Masters**: a master of N frames carries read noise/√N of its own, the
   same in every sub, so more subs cannot average it away; only dithering,
   or an alt-az mount's field rotation, moves it onto different sky. It is
-  compared with the stack's own noise.
+  compared with the stack's own noise. With plate solutions the dithers
+  (see Pointing) are counted: over k positions the master averages to
+  1/√k of itself, k being at most the runs plus the dithers, so the
+  figure stays a lower bound.
 
 ```
 Calibration frames against the lights (20 s, gain/ISO 200, 15.6 °C, filter Nebula)
@@ -193,7 +208,7 @@ Calibration frames against the lights (20 s, gain/ISO 200, 15.6 °C, filter Nebu
   Dark     123 ADU below the bias, so dark − bias (to scale or optimise it) is negative; hot pixels 1.50× the lights', 1.00× scaled to 20 s
   Flat     level 58% of range, no dust shadows
   Gain     ≥ 0.0164 e⁻/ADU by photon transfer on 3 pairs of neighbouring lights (pedestal from the dark: its dark current counts as noise); the gain in use, 0.0165, is consistent
-  Masters  the 9-frame dark adds ≥ 0.5 e⁻ per pixel, the same in every sub, to the 225-sub stack's 0.71 e⁻: undithered, stack noise ≥ +22%
+  Masters  the 9-frame dark adds ≥ 0.5 e⁻ per pixel, the same in every sub, to the 225-sub stack's 0.71 e⁻: dithered over ≤ 81 positions, it averages to ≥ 0.056 e⁻, stack noise ≥ +0.3%
 ```
 
 Then a session summary per filter, naming the best unflagged frame by wFWHM
@@ -205,7 +220,28 @@ airmass^0.6), a line suggests focus drift. With a focuser temperature
 position (`FOCUSPOS`, `FOCPOS`) that changes during the session, another line
 gives how much FWHM grows between moves: the median, over runs of at least
 6 frames at one position, of the last 3 frames' FWHM against the first 3.
-Growth means focus drifts faster than the autofocus runs:
+Growth means focus drifts faster than the autofocus runs. With both, the
+summary turns the session into N.I.N.A. sequencer settings:
+
+- **Move Focuser By Temperature**: the focuser position against its
+  temperature at the start of each run (where the autofocus left it), as a
+  least-absolute-deviation line, so one failed autofocus cannot tilt it.
+  Its slope and intercept are the instruction's Slope and Intercept
+  (position = Slope·T + Intercept). Needs 3 positions over 1 °C; when the
+  rank correlation is under 0.5 it says temperature compensation would not
+  help.
+- **Autofocus After Temperature Change**: FWHM growth per °C within runs
+  whose focuser temperature moved at least 0.5 °C, and the step that grows
+  FWHM 5% (N.I.N.A.'s default HFR trigger; its own default is 5 °C).
+- **Autofocus After HFR Increase**: N.I.N.A.'s trigger replayed at its
+  defaults (5% over a 10-frame least-squares trend, against the lowest HFR
+  since the autofocus) on the HFR column of each run, with how many runs it
+  would have cut short and after how many frames.
+
+A cloud sensor's `CLOUDCVR` (or `SKYTEMP` over `AMBTEMP`, which a clear sky
+keeps far below) that rises as the star count falls (rank correlation under
+−0.5) gets a line saying low star counts are cloud.
+
 
 ```
 Session: 1340 frames, 31 flagged
@@ -215,6 +251,7 @@ Metric      Median    σ (MAD)  Min       Max      Trend
 Stars       3997      458.1    3196      4521     ▅▄▃▂▂▂▂▂▂▃▃▃▄▄▅▅▆▆▆▇▇▇▇██████▅▂▂▁▁▁▁▂▂▂▃▃▅▅▅▆▆▆▇▇▇████▇▆▇▇▆▇
 FWHM "      6.25      1.293    4.12      11.45    ▅▇███▇▆▆▆▆▅▅▄▄▄▄▄▄▃▃▃▃▃▂▂▂▃▃▃▃▅▅▅▅▅▅▄▄▄▃▃▃▂▂▂▃▂▁▂▁▁▁▁▂▂▄▃▃▄▃
 HFD px      6.34      0.861    5.07      9.69     ▅▇███▇▇▆▇▆▆▆▅▄▄▄▄▄▄▃▂▂▂▂▂▂▂▃▃▄▆▅▆▅▆▅▅▅▅▃▃▃▃▃▃▃▂▁▁▁▁▁▁▂▂▃▃▃▄▂
+HFR px      3.37      0.148    2.99      3.84     ▇▇████▇▇▇▇▆▇▆▅▆▆▅▆▅▄▃▄▄▃▃▄▄▅▄▅▆▆▆▆▆▆▆▅▅▄▃▄▄▃▃▄▃▁▂▁▁▂▂▂▄▆▅▄▆▄
 PSF SNR     0.000411  0.00012  0.000166  0.00115  ▁▂▃▃▄▃▃▃▃▃▃▅▅▄▃▃▄▅▄▄▄▆▆▆▅▅▆█▇▄▁▂▂▂▂▂▂▂▂▂▂▂▁▂▂▃▂▁▃▃▃▃▃▃▄▇█▄▆▄
 PSFSW       0.000579  0.00036  0.000156  0.00112  ▁▁▁▁▁▁▂▂▂▂▂▃▃▃▄▄▅▅▅▅▆▇▇█▇▇▇██▄▁▂▂▂▂▂▂▂▃▃▃▄▄▄▅▅▅▅▆▇██▇▆▆▆▇▆▅▆
 Background  6225.0    222.39   5968.8    6800.0   ▆▆▆▆▆▅▅▄▄▄▄▄▃▃▃▂▂▂▂▂▂▂▂▁▁▁▁▁▁▅██▇▇▇▇▇▇▆▆▅▄▄▄▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂
@@ -231,6 +268,11 @@ middle  4.48  0.78 │  5.75  0.60 ·  7.98  0.59 ╱
 bottom  5.24  0.73 ╲  6.68  0.59 ─  9.35  0.63 ╱
 FWHM tilt 92% extreme (corners 4.07–9.35 px), curvature +5% (corners vs centre), right vs left +78%, top vs bottom -25%
 ```
+
+Across a meridian flip each pier side gets its own map, labelled by
+`PIERSIDE` when the header has it (SGP, ASIAIR; N.I.N.A. does not write
+it), else before and after the flip: the optics turn with the tube, and
+mirror flop or a loose focuser can change the tilt.
 
 Reading the field map:
 
@@ -250,6 +292,21 @@ solutions (`ASTRSOLV` not false) of the unflagged frames give the answer:
 ```
 Stack coverage: 1305 plate-solved frames, field rotates 132°
   every frame over 42% of the reference frame, 90% of frames over 47%, half over 71%
+```
+
+Then how the mount held the target, from consecutive plate solutions. A
+step that lands at least 1.5 px off the median step of the 5 either side
+(the drift) is a dither; none means hot pixels and pattern noise stay on
+one sky position. Drift is the frame centre's least-squares rate per run
+(runs split at pauses over 10 min and at meridian flips), with whether
+N.I.N.A.'s Center After Drift would re-centre at its default 10′. A
+meridian flip is a `PIERSIDE` change or, on an equatorial mount, a 180°
+jump in field rotation; the Celestron Origin dithers every frame:
+
+```
+Pointing: 1336 plate-solved frames in 2 runs
+  Dither  every frame, 1095 dithers of 7.9 px (median), at most 5 frames without one
+  Drift   0.3′/h (median of 2 runs), at most 2.3′ from a run's first frame; N.I.N.A. Center After Drift at 10′ (default) would not fire
 ```
 
 Finally, a recommendation for PixInsight's DrizzleIntegration, based on the
@@ -412,7 +469,8 @@ Sub length: 15 s subs
 | Stars | Stars detected above `-sigma` × noise over the local background |
 | FWHM px, FWHM " | Median FWHM of fitted stars, in original sensor pixels and arcseconds. Arcseconds use the plate solve's scale, else `XPIXSZ` and `FOCALLEN`, else `CDELT2` |
 | wFWHM | Siril's weighted FWHM, as its default global registration computes it: FWHM·(1 + 2·(N_ref − N)/N_ref), with N the frame's stars and N_ref the most of any frame through the same filter. A frame that lost stars to haze or cloud ranks worse than its FWHM alone says; `-best` ranks by it |
-| HFD px | ASTAP's half-flux diameter in original pixels, the median over the stars ASTAP's analysis accepts (HFD 0.8–30 px, its SNR over 10): twice the flux-weighted mean distance from the star's centroid, summed out to where its pixels fall below 3σ (Miyashita's method, ASTAP's `HFD`). It needs no PSF model, so it holds for defocused doughnut stars, and it is the figure ASTAP, SGP and N.I.N.A. (HFR, half of it) show. It reads above FWHM: by 7–15% on a Gaussian star of 3–6 px, as ASTAP's bilinear sampling and the pixel's width add to it, and more on stars with Moffat wings |
+| HFD px | ASTAP's half-flux diameter in original pixels, the median over the stars ASTAP's analysis accepts (HFD 0.8–30 px, its SNR over 10): twice the flux-weighted mean distance from the star's centroid, summed out to where its pixels fall below 3σ (Miyashita's method, ASTAP's `HFD`). It needs no PSF model, so it holds for defocused doughnut stars, and it is the figure ASTAP and SGP show. It reads above FWHM: by 7–15% on a Gaussian star of 3–6 px, as ASTAP's bilinear sampling and the pixel's width add to it, and more on stars with Moffat wings |
+| HFR px | N.I.N.A.'s half-flux radius in original pixels, so its image history and Autofocus After HFR Increase trigger can be compared: a centroid weighted by a Gaussian window (σ half the measurement radius, as SExtractor's windowed positions), then the radius at which the enclosed flux, pixel by pixel outward, reaches half of the flux within 1.5× the star's radius. Only stars N.I.N.A. would keep count: a mean over the sky of at least the noise and enough pixels 1.5σ over it, as fainter ones measure their measurement circle, not the star. Unlike the other columns it is a **mean**, over stars whose radius lies within 1.5σ of the mean radius, as N.I.N.A. takes it (`StarDetection.cs`). Each pixel counts at its centre's distance, so it reads low on undersampled stars (9% at FWHM 4 px); with Moffat wings it sits near 0.6× FWHM. It follows FWHM (rank correlation 0.94 over the Bubble session below) over a narrower range, 2.99–3.84 px against FWHM's 3.35–9.30, as N.I.N.A.'s curve of growth on flux clipped at zero does. The star's radius here is the aperture radius, not N.I.N.A.'s edge-detected blob, so expect a few per cent difference from N.I.N.A.'s own figure |
 | Ecc | Median eccentricity: 0 is round, above ~0.5 is visibly elongated |
 | Resid | Median PSF fit residual, as PixInsight's StarResidual: the Winsorized mean \|data − model\| as a fraction of the full sample range (65535 for 16-bit data); high values mean doubled or distorted stars |
 | SNR | Median per-star aperture SNR. Not PixInsight's SNR, which is SNRW |
@@ -433,7 +491,7 @@ Unknown values print as `-`, are empty in CSV and are omitted keys in JSON.
 `-csv` and `-json` write one record per frame with only these per-frame
 metrics, not the session sections. Keys: `file`, `date`, `filter`,
 `exptime`, `ccd_temp`, `altitude`, `moon_alt`, `sun_alt`, `stars`,
-`fwhm_px`, `wfwhm`, `fwhm_arcsec`, `hfd_px`, `eccentricity`, `psf_residual`, `snr`,
+`fwhm_px`, `wfwhm`, `fwhm_arcsec`, `hfd_px`, `hfr_px`, `eccentricity`, `psf_residual`, `snr`,
 `psf_snr`, `psf_signal_weight`, `snr_weight`, `background`, `stddev`,
 `noise_mrs`, `gradient`, `sky_r`, `sky_g`, `sky_b`, `sky_mag`, `hot_pixel_level`,
 `trails` and `flags`.

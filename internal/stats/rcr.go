@@ -117,6 +117,10 @@ func meanStd(v []float64) (float64, float64) {
 	return mean, math.Sqrt(sq / float64(len(v)-1))
 }
 
+// LineFit is medfit for other packages: the least absolute deviation line
+// y = a + b·x, which one bad point cannot tilt. len(x) ≥ 3.
+func LineFit(x, y []float64) (float64, float64) { return medfit(x, y) }
+
 // medfit is PCL's LinearFit (src/pcl/LinearFitReference.cpp), Numerical
 // Recipes' medfit: the line y = a + b·x minimising Σ|y − a − b·x|, by
 // bisection on the slope from the least squares solution. len(x) ≥ 3.

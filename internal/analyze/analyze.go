@@ -26,6 +26,9 @@ type Result struct {
 	// HFD is ASTAP's half-flux diameter in original pixels, median over
 	// the stars it accepts: see hfd.
 	HFD float64
+	// HFR is N.I.N.A.'s half-flux radius in original pixels, mean over the
+	// stars it keeps: see ninaHFR and meanHFR.
+	HFR float64
 	SNR float64 // median over all detected stars
 	// PSFSNR and PSFSW are PixInsight's PSF SNR and PSF Signal Weight,
 	// WBPP's default weight (BPP-Global.js:273): see psfSNR and psfSW.
@@ -111,7 +114,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 	nan := math.NaN()
 	r := Result{
 		Meta: img.Meta, Bg: bg, Std: std, Noise: noise,
-		FWHM: nan, FWHMArc: nan, HFD: nan, Ecc: nan, Resid: nan, SNR: nan, PSFSNR: nan, PSFSW: nan,
+		FWHM: nan, FWHMArc: nan, HFD: nan, HFR: nan, Ecc: nan, Resid: nan, SNR: nan, PSFSNR: nan, PSFSW: nan,
 		SNRW: snrw, Gradient: gradient, GradAngle: gradAngle,
 		NoiseE: electrons(img.PixNoise, img.Gain), Gain: electrons(1, img.Gain),
 	}
@@ -140,7 +143,8 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 
 	visited := make([]bool, len(img.Pix))
 	var stars []star
-	var snrs, hfds, hot []float64
+	var snrs, hfds, hfrs, radii, hot []float64
+	var hb hfrBuf
 	for _, c := range cands {
 		if visited[c] {
 			continue
@@ -163,6 +167,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 		r.Stars++
 		snrs = append(snrs, snr)
 		hfds = append(hfds, hfd(img, c)*img.Scale)
+		hfrs, radii = append(hfrs, hb.ninaHFR(img, c, ra, sky, noise)*img.Scale), append(radii, ra)
 		if snr < minFitSNR {
 			continue
 		}
@@ -176,6 +181,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 	// orders of magnitude, so its mean would follow the brightest few stars.
 	r.SNR = stats.MedianOf(snrs)
 	r.HFD = stats.MedianOf(slices.DeleteFunc(hfds, math.IsNaN))
+	r.HFR = meanHFR(hfrs, radii)
 	r.PSFSNR = psfSNR(stars, noise)
 	r.PSFSW = psfSW(stars, noise, mstar)
 	r.Hot = hotLevel(hot)

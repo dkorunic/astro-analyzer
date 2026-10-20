@@ -339,3 +339,19 @@ func TestHFD(t *testing.T) {
 		}
 	}
 }
+
+// TestHFR checks N.I.N.A.'s half-flux radius against a Gaussian's, the
+// radius enclosing half its light: σ√(2 ln 2), with the pixel's 1/12 added
+// to σ² as the stars are pixel-integrated. Only well-sampled stars match:
+// the curve of growth counts each pixel at its centre's distance, so it
+// reads 9% low at FWHM 4 px, as N.I.N.A. does.
+func TestHFR(t *testing.T) {
+	for _, fwhm := range []float64{6, 8} {
+		r := analyze.Frame(synth.Image(synth.StarField(fwhm, fwhm)), 5, psf.Gaussian)
+		sigma := fwhm / (2 * math.Sqrt(2*math.Ln2))
+		want := math.Sqrt(sigma*sigma+1.0/12) * math.Sqrt(2*math.Ln2)
+		if !near(r.HFR, want, 0.03) {
+			t.Errorf("fwhm %.1f: hfr %.3f, want %.3f", fwhm, r.HFR, want)
+		}
+	}
+}

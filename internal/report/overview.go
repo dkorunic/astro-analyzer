@@ -34,6 +34,11 @@ func Overview(w io.Writer, frames []Frame) {
 	if line := equipment(frames[0].Result.Meta); line != "" {
 		fmt.Fprintf(w, "\n%s\n", line)
 	}
+	for _, line := range []string{cooler(frames), dew(frames)} {
+		if line != "" {
+			fmt.Fprintln(w, line)
+		}
+	}
 	groups := byFilter(frames)
 	for _, idx := range groups {
 		sub := subset(frames, idx)

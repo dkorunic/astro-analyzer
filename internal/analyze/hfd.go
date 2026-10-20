@@ -25,7 +25,7 @@ const (
 // estimator, twice the flux-weighted mean distance from the centroid, over
 // the square out to where the pixels 3σ over the annulus sky give out. It
 // needs no model, so it holds for defocused doughnuts, and it is the number
-// N.I.N.A. (as HFR, half of it), SGP and ASTAP show.
+// SGP and ASTAP show. N.I.N.A. measures its own HFR: see ninaHFR.
 //
 // ponytail: summed over a square, as ASTAP does: corners add a little sky
 // noise on faint stars.

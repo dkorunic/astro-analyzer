@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Go CLI that measures astrophotography subframes (FITS, fpack `.fz`, XISF,
-TIFF, camera RAW via dcraw: stars, FWHM, ASTAP's HFD,
+TIFF, camera RAW via dcraw: stars, FWHM, ASTAP's HFD, N.I.N.A.'s HFR,
 eccentricity, SNR and PixInsight's PSF SNR / PSFSW / SNRW weights, sky
 background, brightness and gradient, wavelet noise, hot pixels, satellite
 trails), flags
@@ -36,9 +36,9 @@ Dependencies only point downward in this list:
 | Package | Role |
 |---|---|
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
-| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and camera presets (`subs.go`), chip QE, colour response and dark current, sky brightness and Bortle class (`sky.go`), CSV/JSON |
+| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and camera presets (`subs.go`), chip QE, colour response and dark current, sky brightness and Bortle class (`sky.go`), acquisition checks and N.I.N.A. trigger settings: focus temperature slope, HFR/temperature triggers, cooler, dew, cloud, dither cadence, pointing drift, meridian flips (`acquisition.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
-| `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, ASTAP HFD (`hfd.go`), medians, PSF SNR/PSFSW/SNRW, gradient, hot level, trails (`trails.go`), raw pixel noise, Sun/Moon, 3×3 field cells |
+| `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, ASTAP HFD (`hfd.go`), N.I.N.A. HFR (`hfr.go`), medians, PSF SNR/PSFSW/SNRW, gradient, hot level, trails (`trails.go`), raw pixel noise, Sun/Moon, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
 | `internal/sky` | Low-precision Sun and Moon positions (Astronomical Almanac), altitude, illumination |
 | `internal/stats` | Median/MAD, outlier rule, Spearman, Chauvenet (RCR), sigma-clipped sky, wavelet MRS noise + background map, sky gradient plane, M* and two-sided scale (PSFSW, SNRW) |
@@ -53,7 +53,7 @@ instead, set before `FlagOutliers`. That
 entry drives the table column, CSV/JSON key, summary row and outlier flag.
 
 The default output runs, in order (`main.go`): `Table`, `Overview`,
-`Calibration`, `Summary`, `Field`, `Coverage`, `Drizzle`, `WBPP`,
+`Calibration`, `Summary`, `Field`, `Coverage`, `Pointing`, `Drizzle`, `WBPP`,
 `SubLength`. README shows each section's output from a real Bubble Nebula
 session (Origin Mark II, 1340 frames); refresh those examples when a
 section's format changes, and list a new metric's CSV/JSON key there.
@@ -235,3 +235,15 @@ by the default run.
 - RAW: Coffin's `dcraw -D -4 -t 0 -c` (visible area, to stdout). LibRaw's
   `unprocessed_raw` includes the masked borders and `dcraw_emu` has no
   `-D`; dcraw 9.28 cannot read CR3.
+- **N.I.N.A. is the reference for HFR and its triggers** (`NINA.Image`,
+  `NINA.Sequencer` at commit 4742afa; cite `file.cs:line`). Its HFR is a
+  curve-of-growth radius averaged with a **mean** after a 1.5σ cut on star
+  radius, unlike every other column's median: that is what its image
+  history and Autofocus After HFR Increase use. Trigger defaults (5%, 10
+  frames, 5 °C, 10′) are constants in `acquisition.go`. NINA writes no
+  `PIERSIDE`; flips are 180° ± 15° rotation jumps, counted only when the
+  field otherwise holds within 5° (equatorial), so alt-az rotation never
+  reads as a flip.
+- Dithers are steps between consecutive plate solutions at least 1.5 px
+  off the median step of the 5 either side (the drift). Celestron Origin
+  dithers every frame, 8 px (Bubble) to 30 px (Mizar, Whirlpool).

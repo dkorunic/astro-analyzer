@@ -56,6 +56,7 @@ var metrics = []metric{
 	{name: "wFWHM", key: "wfwhm", prec: 2, bad: 0, get: func(f Frame) float64 { return f.WFWHM }},                  // ranks frames; FWHM and Stars flag them
 	{name: "FWHM \"", key: "fwhm_arcsec", prec: 2, bad: 0, get: func(f Frame) float64 { return f.Result.FWHMArc }}, // same signal as FWHM px
 	{name: "HFD px", key: "hfd_px", prec: 2, bad: 0, get: func(f Frame) float64 { return f.Result.HFD }},           // same signal as FWHM px
+	{name: "HFR px", key: "hfr_px", prec: 2, bad: 0, get: func(f Frame) float64 { return f.Result.HFR }},           // N.I.N.A.'s; same signal as FWHM px
 	{name: "Ecc", key: "eccentricity", prec: 2, bad: +1, get: func(f Frame) float64 { return f.Result.Ecc }},
 	{name: "Resid", key: "psf_residual", prec: 4, bad: +1, get: func(f Frame) float64 { return f.Result.Resid }},
 	{name: "SNR", key: "snr", prec: 1, bad: -1, get: func(f Frame) float64 { return f.Result.SNR }},
@@ -321,7 +322,7 @@ func summary(w io.Writer, frames []Frame, label string) {
 		fmt.Fprintf(w, "Reference frame for registration: %s (best wFWHM %.2f px, %d stars)\n",
 			filepath.Base(best.Path), best.WFWHM, best.Result.Stars)
 	}
-	for _, line := range []string{focusDrift(frames), refocus(frames)} {
+	for _, line := range []string{focusDrift(frames), refocus(frames), focusSlope(frames), tempTrigger(frames), hfrTrigger(frames), cloud(frames)} {
 		if line != "" {
 			fmt.Fprintln(w, line)
 		}
@@ -396,30 +397,16 @@ const (
 func refocus(frames []Frame) string {
 	var growth []float64
 	moves := 0
-	for i := 0; i < len(frames); {
-		j := i + 1
-		for j < len(frames) && frames[j].Result.Focus == frames[i].Result.Focus {
-			j++
-		}
-		if math.IsNaN(frames[i].Result.Focus) {
-			i = j
-
-			continue
-		}
-		if i > 0 && !math.IsNaN(frames[i-1].Result.Focus) {
+	for _, run := range focusRuns(frames) {
+		if run.moved {
 			moves++
 		}
-		if run := frames[i:j]; len(run) >= refocusRun {
-			first, last := make([]float64, refocusEnds), make([]float64, refocusEnds)
-			for k := range refocusEnds {
-				first[k], last[k] = run[k].Result.FWHM, run[len(run)-refocusEnds+k].Result.FWHM
-			}
-			g := stats.MedianOf(slices.DeleteFunc(last, math.IsNaN))/stats.MedianOf(slices.DeleteFunc(first, math.IsNaN)) - 1
-			if !math.IsNaN(g) {
+		if r := frames[run.start:run.end]; len(r) >= refocusRun {
+			first, last := ends(r, fwhmOf)
+			if g := last/first - 1; !math.IsNaN(g) {
 				growth = append(growth, g)
 			}
 		}
-		i = j
 	}
 	if moves == 0 || len(growth) == 0 {
 		return ""
@@ -482,11 +469,35 @@ func JSON(w io.Writer, frames []Frame) error {
 // fingerprints: coma elongates the corners radially, tilt makes one side
 // wider, tracking or wind elongates every cell the same way. Filters focus
 // differently, so each gets its own map.
+//
+// Across a meridian flip each pier side gets its own map: the optics turn
+// with the tube, and mirror flop or a loose focuser can change tilt.
 func Field(w io.Writer, frames []Frame) {
+	sides := pierSides(frames)
 	groups := byFilter(frames)
 	for _, idx := range groups {
 		sub := subset(frames, idx)
-		field(w, sub, filterLabel(sub, groups))
+		if sides == nil {
+			field(w, sub, filterLabel(sub, groups))
+
+			continue
+		}
+		var keys []string
+		bySide := map[string][]int{}
+		for _, i := range idx {
+			if _, ok := bySide[sides[i]]; !ok {
+				keys = append(keys, sides[i])
+			}
+			bySide[sides[i]] = append(bySide[sides[i]], i)
+		}
+		for _, k := range keys {
+			side := subset(frames, bySide[k])
+			label := k
+			if len(groups) > 1 {
+				label = "filter " + cmp.Or(side[0].Result.Filter, "-") + ", " + k
+			}
+			field(w, side, " ("+label+")")
+		}
 	}
 }
 

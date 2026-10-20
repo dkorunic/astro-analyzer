@@ -59,6 +59,14 @@ func TestLoad(t *testing.T) {
 		fitsio.Card{Name: "EXPTIME", Value: 15.0},
 		fitsio.Card{Name: "ALTITUDE", Value: 120.0}, // site elevation, must be ignored
 		fitsio.Card{Name: "AIRMASS", Value: 2.0},
+		// N.I.N.A.'s cooler and weather cards; PIERSIDE as SGP writes it.
+		fitsio.Card{Name: "SET-TEMP", Value: -10.0},
+		fitsio.Card{Name: "AMBTEMP", Value: 8.5},
+		fitsio.Card{Name: "DEWPOINT", Value: 6},
+		fitsio.Card{Name: "HUMIDITY", Value: 87.0},
+		fitsio.Card{Name: "CLOUDCVR", Value: 12.0},
+		fitsio.Card{Name: "SKYTEMP", Value: -21.0},
+		fitsio.Card{Name: "PIERSIDE", Value: "West"},
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +87,9 @@ func TestLoad(t *testing.T) {
 	m := img.Meta
 	if m.Date != "2026-10-16T21:16:00" || m.Exp != 15 || math.Abs(m.Alt-30) > 1e-9 || !math.IsNaN(m.Temp) {
 		t.Errorf("meta = %+v, want date, 15 s, 30° altitude from AIRMASS 2, unknown temp", m)
+	}
+	if m.SetTemp != -10 || m.Ambient != 8.5 || m.DewPoint != 6 || m.Humidity != 87 || m.Cloud != 12 || m.SkyTemp != -21 || m.Pier != "WEST" {
+		t.Errorf("cooler/weather/pier = %v %v %v %v %v %v %q", m.SetTemp, m.Ambient, m.DewPoint, m.Humidity, m.Cloud, m.SkyTemp, m.Pier)
 	}
 }
 

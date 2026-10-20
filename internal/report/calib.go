@@ -386,9 +386,16 @@ func gainCheck(frames []Frame, biases, darks []Calib, pairGain func(a, b string,
 // masterNoise is the noise calibration adds: a master of N frames carries
 // read noise/√N of its own, the same in every sub, so stacking more subs
 // cannot average it away; only dithering (or an alt-az mount's field
-// rotation) moves it to different sky. The darks carry the bias, so they
-// are the master when present. A lower bound: the dark's own shot noise is
-// left out, as Origin darks sit below their bias and do not show it.
+// rotation) moves it to different sky. With plate solutions the dithers
+// are counted: over k sensor positions the master's pattern lands on k
+// places of the registered stack and averages to 1/√k. k is an upper
+// bound (positions), so that stays a lower bound. The darks carry the
+// bias, so they are the master when present. A lower bound: the dark's own
+// shot noise is left out, as Origin darks sit below their bias and do not
+// show it.
+//
+// ponytail: field rotation alone is not counted, and flagged frames'
+// positions are, so k comes from all frames, capped at the stacked subs.
 func masterNoise(frames []Frame, darks, biases []Calib, rn float64) string {
 	master, kind := darks, "dark"
 	if len(master) == 0 {
@@ -417,9 +424,21 @@ func masterNoise(frames []Frame, darks, biases []Calib, rn float64) string {
 		return ""
 	}
 	cal, stack := rn/math.Sqrt(n), sub/math.Sqrt(float64(subs))
+	head := fmt.Sprintf("the %g-frame %s adds ≥ %.2g e⁻ per pixel, the same in every sub, to the %d-sub stack's %.2g e⁻: ",
+		n, kind, cal, subs, stack)
+	p := newPointing(frames)
+	d := measureDithers(p)
+	if d.steps == 0 {
+		return head + fmt.Sprintf("undithered, stack noise ≥ +%.0f%%", 100*(math.Hypot(1, cal/stack)-1))
+	}
+	if len(d.size) == 0 {
+		return head + fmt.Sprintf("not dithered, so stack noise ≥ +%.0f%%", 100*(math.Hypot(1, cal/stack)-1))
+	}
+	k := min(d.positions(len(p.runs)), subs)
+	mixed := cal / math.Sqrt(float64(k))
 
-	return fmt.Sprintf("the %g-frame %s adds ≥ %.2g e⁻ per pixel, the same in every sub, to the %d-sub stack's %.2g e⁻: "+
-		"undithered, stack noise ≥ +%.0f%%", n, kind, cal, subs, stack, 100*(math.Hypot(1, cal/stack)-1))
+	return head + fmt.Sprintf("dithered over ≤ %d positions, it averages to ≥ %.2g e⁻, stack noise ≥ +%.1f%%",
+		k, mixed, 100*(math.Hypot(1, mixed/stack)-1))
 }
 
 // BiasReadNoise is the read noise in e⁻ from the session's bias frames at

@@ -171,6 +171,7 @@ func main() {
 		report.Summary(os.Stdout, frames)
 		report.Field(os.Stdout, frames)
 		report.Coverage(os.Stdout, frames)
+		report.Pointing(os.Stdout, frames)
 		report.Drizzle(os.Stdout, frames)
 		report.WBPP(os.Stdout, frames)
 		report.SubLength(os.Stdout, frames, rn, src)

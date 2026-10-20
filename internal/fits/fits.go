@@ -80,13 +80,18 @@ type Meta struct {
 	// see cfaSamples.
 	Bayer string
 	// Type is the frame type (Light, Bias, Dark...): see frameType.
-	Type           string
+	Type string
+	// Pier is the mount's pier side (PIERSIDE: EAST or WEST, as SGP and
+	// ASIAIR write it), "" if absent. N.I.N.A. does not write it.
+	Pier           string
 	WCS            WCS    // plate solution, for drizzle dither analysis
 	Size           [2]int // sensor pixels, before Bayer binning
 	Exp, Temp, Alt float64
-	Setting        float64 // camera gain setting: GAIN, else ISOSPEED; NaN if absent
-	Plate          float64 // arcsec per original pixel, 0 if unknown
-	Pixel          float64 // XPIXSZ, µm, binning included; 0 if unknown
+	// SetTemp is the cooler's setpoint (SET-TEMP), NaN without a cooler.
+	SetTemp float64
+	Setting float64 // camera gain setting: GAIN, else ISOSPEED; NaN if absent
+	Plate   float64 // arcsec per original pixel, 0 if unknown
+	Pixel   float64 // XPIXSZ, µm, binning included; 0 if unknown
 	// Focus is the focuser position (FOCUSPOS, FOCPOS) and FocusTemp its
 	// temperature (FOCTEMP, FOCUSTEM), as N.I.N.A. and ASTAP read them; NaN
 	// if absent.
@@ -94,10 +99,15 @@ type Meta struct {
 	// SQM is a sky brightness the capture software wrote, mag/arcsec²
 	// (SQM: ASTAP's photometric, zenith-corrected, or N.I.N.A.'s from a
 	// meter; MPSAS); NaN if absent.
-	SQM                float64
-	Aperture, FocalLen float64 // mm
-	Lat, Lon           float64 // site, degrees, east positive
-	RA, Dec            float64 // target (frame centre), degrees
+	SQM float64
+	// Weather station readings N.I.N.A. writes (ObservingConditions):
+	// ambient temperature and dew point in °C, relative humidity and cloud
+	// cover in %, and the cloud sensor's sky temperature in °C; NaN if
+	// absent.
+	Ambient, DewPoint, Humidity, Cloud, SkyTemp float64
+	Aperture, FocalLen                          float64 // mm
+	Lat, Lon                                    float64 // site, degrees, east positive
+	RA, Dec                                     float64 // target (frame centre), degrees
 	// Stack is how many frames an integrated image combines (NCOMBINE,
 	// NSTACK, STACKCNT); NaN for a single exposure. Celestron Origin's bias
 	// and dark files are 9-frame masters.
@@ -631,6 +641,13 @@ func meta(hdr *fitsio.Header, axes []int, typ string) Meta {
 		Exp:       first(hdr, "EXPTIME", "EXPOSURE"),
 		Setting:   first(hdr, "GAIN", "ISOSPEED"),
 		Temp:      first(hdr, "CCD-TEMP"),
+		SetTemp:   first(hdr, "SET-TEMP"),
+		Ambient:   first(hdr, "AMBTEMP"),
+		DewPoint:  first(hdr, "DEWPOINT"),
+		Humidity:  first(hdr, "HUMIDITY"),
+		Cloud:     first(hdr, "CLOUDCVR"),
+		SkyTemp:   first(hdr, "SKYTEMP"),
+		Pier:      strings.ToUpper(str(hdr, "PIERSIDE")),
 		Focus:     first(hdr, "FOCUSPOS", "FOCPOS"),
 		FocusTemp: first(hdr, "FOCTEMP", "FOCUSTEM"),
 		SQM:       first(hdr, "SQM", "MPSAS"),
