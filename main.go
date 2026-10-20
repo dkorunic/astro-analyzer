@@ -21,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/dkorunic/astro-analyzer/internal/analyze"
 	"github.com/dkorunic/astro-analyzer/internal/fits"
@@ -238,13 +239,20 @@ func readNoiseFor(flagged float64, frames []report.Frame, calib []report.Calib) 
 // blocks the work it reports on.
 func spin(status func() string) func() {
 	done := make(chan struct{})
-	var wg sync.WaitGroup
+	var (
+		wg    sync.WaitGroup
+		width int // runes on the line now, read by stop after wg.Wait
+	)
 	wg.Go(func() {
 		frames := []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 		t := time.NewTicker(80 * time.Millisecond)
 		defer t.Stop()
 		for i := 0; ; i++ {
-			fmt.Fprintf(os.Stderr, "\r\033[K%c %s", frames[i%len(frames)], status())
+			line := fmt.Sprintf("%c %s", frames[i%len(frames)], status())
+			n := utf8.RuneCountInString(line)
+			// Spaces, not ESC[K: the legacy Windows console prints escapes as ←[K.
+			fmt.Fprintf(os.Stderr, "\r%s%s", line, strings.Repeat(" ", max(width-n, 0)))
+			width = n
 			select {
 			case <-done:
 				return
@@ -256,7 +264,7 @@ func spin(status func() string) func() {
 	return func() {
 		close(done)
 		wg.Wait()
-		fmt.Fprint(os.Stderr, "\r\033[K")
+		fmt.Fprintf(os.Stderr, "\r%s\r", strings.Repeat(" ", width))
 	}
 }
 
