@@ -95,6 +95,7 @@ func main() {
 
 	res := make([]analyze.Result, len(files))
 	errs := make([]error, len(files))
+	calibImg := make([]fits.Image, len(files))
 	sem := make(chan struct{}, runtime.NumCPU())
 	start := time.Now()
 	if tty {
@@ -109,7 +110,7 @@ func main() {
 			img, err := fits.Load(f)
 			if err != nil {
 				errs[i] = err
-				res[i].Meta = img.Meta // a calibration frame's header
+				calibImg[i] = img // a calibration frame: header, bias/dark noise and level
 
 				return
 			}
@@ -130,12 +131,12 @@ func main() {
 	exit := 0
 	skipped := map[string]int{}
 	var frames []report.Frame
-	var calib []fits.Meta
+	var calib []report.Calib
 	for i, f := range files {
 		if errors.Is(errs[i], fits.ErrNotLight) {
-			skipped[res[i].Type]++
-			if res[i].Type != fits.Stack {
-				calib = append(calib, res[i].Meta)
+			skipped[calibImg[i].Meta.Type]++
+			if calibImg[i].Meta.Type != fits.Stack {
+				calib = append(calib, report.Calib{Path: f, Image: calibImg[i]})
 			}
 
 			continue
@@ -183,13 +184,25 @@ func main() {
 		report.Coverage(os.Stdout, frames)
 		report.Drizzle(os.Stdout, frames)
 		report.WBPP(os.Stdout, frames)
-		report.SubLength(os.Stdout, frames, *readNoise)
+		rn, src := readNoiseFor(*readNoise, frames, calib)
+		report.SubLength(os.Stdout, frames, rn, src)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		exit = 1
 	}
 	os.Exit(exit)
+}
+
+// readNoiseFor picks the read noise for the sub-length comparison: the
+// -read-noise flag, else the session's bias frames; NaN leaves it to the
+// camera preset.
+func readNoiseFor(flagged float64, frames []report.Frame, calib []report.Calib) (float64, string) {
+	if flagged > 0 {
+		return flagged, "-read-noise"
+	}
+
+	return report.BiasReadNoise(frames, calib, fits.PairNoise)
 }
 
 // spin animates a spinner in front of status() on stderr until the returned

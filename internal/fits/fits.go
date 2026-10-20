@@ -25,6 +25,7 @@ var (
 	ErrNotLight = errors.New("not a light frame")
 	ErrNoImage  = errors.New("no image HDU found")
 	ErrBitpix   = errors.New("unsupported BITPIX")
+	ErrSize     = errors.New("frames differ in size")
 )
 
 // Image is one frame's pixels plus what the analysis needs from its header.
@@ -44,6 +45,9 @@ type Image struct {
 	// PixNoise is the noise of one raw pixel in ADU, measured before
 	// binning: see pixNoise.
 	PixNoise float64
+	// Level is the median raw sample of a bias or dark frame, whose pixels
+	// Load does not keep; 0 for lights.
+	Level float64
 }
 
 // Meta is observing context from the FITS header; NaN/""/zero when absent.
@@ -78,96 +82,169 @@ type Meta struct {
 // Load reads the first 2D/3D image HDU, applies BSCALE/BZERO, averages colour
 // planes and 2x2-bins Bayer (CFA) data. Gain comes from EGAIN and plate scale
 // from XPIXSZ/FOCALLEN (or CDELT2); either is left 0 when the header lacks it.
+//
+// Other frame types return ErrNotLight with the header's Meta; bias and dark
+// frames also get PixNoise and Level, for read noise and the dark's pedestal.
 func Load(path string) (Image, error) {
+	im, done, err := firstImage(path)
+	if err != nil {
+		return Image{}, err
+	}
+	defer done()
+	hdr, axes := im.Header(), im.Header().Axes()
+	w, h := axes[0], axes[1]
+	if t := frameType(filepath.Base(path), hdr); t != Light {
+		img := Image{Meta: meta(hdr, axes, t)}
+		if t == Bias || t == Dark {
+			pix, _, err := samples(im)
+			if err != nil {
+				return Image{}, err
+			}
+			img.PixNoise, img.Level = pixNoise(pix, w, h), float64(rough(pix))
+		}
+
+		return img, ErrNotLight
+	}
+	pix, planes, err := samples(im)
+	if err != nil {
+		return Image{}, err
+	}
+	img := Image{W: w, H: h, Pix: pix, Scale: 1}
+	blankBorder(img.Pix, w, h)
+	// Celestron Origin stores each ADC count as several ADU (25 at ISO
+	// 1000: every pixel a multiple of 25) but writes EGAIN per count.
+	// Photon transfer on a real session gives 0.0095 e-/ADU against
+	// EGAIN/25 = 0.0112. ponytail: only Origin is verified; other
+	// software scales 12-bit data by 16 and may write EGAIN either way.
+	adu := 1.0
+	if strings.HasPrefix(str(hdr, "CREATOR"), "Origin") && hdr.Bitpix() > 0 {
+		adu = float64(step(img.Pix))
+	}
+	// Before binning: a clipped core averaged with unclipped neighbours no
+	// longer looks saturated. ponytail: RGB planes are averaged first, same dilution.
+	img.Sat = Saturation(img.Pix)
+	noise := pixNoise(img.Pix, w, h)
+	var flip bool
+	if planes == 1 && hdr.Get("BAYERPAT") != nil {
+		var colour [3][]float32
+		colour, flip = cfaSamples(img.Pix, w, h, hdr)
+		img = Bin2(img)
+		img.Colour = colour
+	}
+	img.PixNoise = noise
+	g, _ := num(hdr, "EGAIN")
+	// The original Origin's values step by 6.25 ADU (gaps of 6 and 7), so
+	// step finds 1, and its EGAIN is 4.5× the photon-transfer gain: 0.0742
+	// at ISO 200 against 0.0162 (consecutive raw lights, unit 7a8cfd) and
+	// 0.0165 (originstack camera_profile.py, 31 sessions, unit 932f56); at
+	// ISO 500 0.0297 against 0.0064. ponytail: one ratio for every ISO,
+	// 3% high at ISO 500.
+	if strings.HasPrefix(str(hdr, "CAMERA"), "Origin178") {
+		g /= 4.5
+	}
+	img.Gain = max(g, 0) / adu
+	img.Range = math.Exp2(float64(hdr.Bitpix())) - 1
+	// Float data normalised to [0, 1] (PixInsight) is no longer in ADU,
+	// so EGAIN no longer converts it to electrons.
+	if hdr.Bitpix() < 0 {
+		img.Range = 65535 // ponytail: float ADU data assumed 16-bit
+		if maxOf(img.Pix) <= 1 {
+			img.Gain, img.Range = 0, 1
+		}
+	}
+
+	img.Meta = meta(hdr, axes, Light)
+	img.Meta.BayerFlip = flip
+
+	return img, nil
+}
+
+// firstImage opens the first 2D/3D image HDU of path; done closes the file.
+func firstImage(path string) (fitsio.Image, func(), error) { //nolint:ireturn // fitsio's image HDU is an interface
 	fh, err := os.Open(path)
 	if err != nil {
-		return Image{}, err
+		return nil, nil, err
 	}
-	defer fh.Close()
 	f, err := fitsio.Open(bufio.NewReader(fh))
 	if err != nil {
-		return Image{}, err
+		fh.Close()
+
+		return nil, nil, err
 	}
-	defer f.Close()
-
+	done := func() {
+		f.Close()
+		fh.Close()
+	}
 	for _, hdu := range f.HDUs() {
-		im, ok := hdu.(fitsio.Image)
-		axes := hdu.Header().Axes()
-		if !ok || len(axes) < 2 || axes[0]*axes[1] == 0 {
-			continue
-		}
-		hdr := hdu.Header()
-		if t := frameType(filepath.Base(path), hdr); t != Light {
-			// The header is enough to check calibration frames against the lights.
-			return Image{Meta: meta(hdr, axes, t)}, ErrNotLight
-		}
-		bscale, ok := num(hdr, "BSCALE")
-		if !ok {
-			bscale = 1
-		}
-		bzero, _ := num(hdr, "BZERO")
-		// BLANK marks undefined integer pixels; float data uses NaN for that.
-		blank, hasBlank := num(hdr, "BLANK")
-		if !hasBlank || hdr.Bitpix() < 0 {
-			blank = math.NaN() // equal to nothing
-		}
-
-		w, h := axes[0], axes[1]
-		img := Image{W: w, H: h, Pix: make([]float32, w*h), Scale: 1}
-		planes, err := readPixels(im, hdr.Bitpix(), img.Pix, bscale, bzero, blank)
-		if err != nil {
-			return Image{}, err
-		}
-		blankBorder(img.Pix, w, h)
-		// Celestron Origin stores each ADC count as several ADU (25 at ISO
-		// 1000: every pixel a multiple of 25) but writes EGAIN per count.
-		// Photon transfer on a real session gives 0.0095 e-/ADU against
-		// EGAIN/25 = 0.0112. ponytail: only Origin is verified; other
-		// software scales 12-bit data by 16 and may write EGAIN either way.
-		adu := 1.0
-		if strings.HasPrefix(str(hdr, "CREATOR"), "Origin") && hdr.Bitpix() > 0 {
-			adu = float64(step(img.Pix))
-		}
-		// Before binning: a clipped core averaged with unclipped neighbours no
-		// longer looks saturated. ponytail: RGB planes are averaged first, same dilution.
-		img.Sat = Saturation(img.Pix)
-		noise := pixNoise(img.Pix, w, h)
-		var flip bool
-		if planes == 1 && hdr.Get("BAYERPAT") != nil {
-			var colour [3][]float32
-			colour, flip = cfaSamples(img.Pix, w, h, hdr)
-			img = Bin2(img)
-			img.Colour = colour
-		}
-		img.PixNoise = noise
-		g, _ := num(hdr, "EGAIN")
-		// The original Origin's values step by 6.25 ADU (gaps of 6 and 7), so
-		// step finds 1, and its EGAIN is 4.5× the photon-transfer gain: 0.0742
-		// at ISO 200 against 0.0162 (consecutive raw lights, unit 7a8cfd) and
-		// 0.0165 (originstack camera_profile.py, 31 sessions, unit 932f56); at
-		// ISO 500 0.0297 against 0.0064. ponytail: one ratio for every ISO,
-		// 3% high at ISO 500.
-		if strings.HasPrefix(str(hdr, "CAMERA"), "Origin178") {
-			g /= 4.5
-		}
-		img.Gain = max(g, 0) / adu
-		img.Range = math.Exp2(float64(hdr.Bitpix())) - 1
-		// Float data normalised to [0, 1] (PixInsight) is no longer in ADU,
-		// so EGAIN no longer converts it to electrons.
-		if hdr.Bitpix() < 0 {
-			img.Range = 65535 // ponytail: float ADU data assumed 16-bit
-			if maxOf(img.Pix) <= 1 {
-				img.Gain, img.Range = 0, 1
+		if im, ok := hdu.(fitsio.Image); ok {
+			if axes := hdu.Header().Axes(); len(axes) >= 2 && axes[0]*axes[1] != 0 {
+				return im, done, nil
 			}
 		}
-
-		img.Meta = meta(hdr, axes, Light)
-		img.Meta.BayerFlip = flip
-
-		return img, nil
 	}
+	done()
 
-	return Image{}, ErrNoImage
+	return nil, nil, ErrNoImage
+}
+
+// samples reads im's pixels with BSCALE/BZERO applied and colour planes
+// averaged, and returns the plane count.
+func samples(im fitsio.Image) ([]float32, int, error) {
+	hdr := im.Header()
+	bscale, ok := num(hdr, "BSCALE")
+	if !ok {
+		bscale = 1
+	}
+	bzero, _ := num(hdr, "BZERO")
+	// BLANK marks undefined integer pixels; float data uses NaN for that.
+	blank, hasBlank := num(hdr, "BLANK")
+	if !hasBlank || hdr.Bitpix() < 0 {
+		blank = math.NaN() // equal to nothing
+	}
+	axes := hdr.Axes()
+	pix := make([]float32, axes[0]*axes[1])
+	planes, err := readPixels(im, hdr.Bitpix(), pix, bscale, bzero, blank)
+
+	return pix, planes, err
+}
+
+// PairNoise is the read noise in ADU from two bias frames: the robust σ of
+// their difference over √2. Differencing cancels the fixed pattern that a
+// single frame's pixel-to-pixel noise still holds. Every 16th row and 3rd
+// pixel keep it cheap, as in pixNoise.
+func PairNoise(a, b string) (float64, error) {
+	var pix [2][]float32
+	var w int
+	for i, p := range []string{a, b} {
+		im, done, err := firstImage(p)
+		if err != nil {
+			return math.NaN(), err
+		}
+		pix[i], _, err = samples(im)
+		w = im.Header().Axes()[0]
+		done()
+		if err != nil {
+			return math.NaN(), err
+		}
+	}
+	if len(pix[0]) != len(pix[1]) {
+		return math.NaN(), fmt.Errorf("%w: %s, %s", ErrSize, a, b)
+	}
+	var d []float64
+	for y := 0; y < len(pix[0])/w; y += 16 {
+		for x := 0; x < w; x += 3 {
+			if v := float64(pix[0][y*w+x] - pix[1][y*w+x]); !math.IsNaN(v) {
+				d = append(d, v)
+			}
+		}
+	}
+	if len(d) < 100 {
+		return math.NaN(), nil
+	}
+	slices.Sort(d)
+	n := len(d) - 1
+
+	return (d[n*841/1000] - d[n*159/1000]) / 2 / math.Sqrt2, nil
 }
 
 // Frame types from frameType.

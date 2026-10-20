@@ -124,16 +124,20 @@ Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 28 min unflagged, over 2 nigh
 ```
 
 When the directories hold calibration frames, their headers are checked
-against the lights' (no calibration pixels are read): gain or ISO for bias
-and darks, dark exposure and a sensor temperature 5 °C or more away, the
-flat's filter and frame size. Files sharing one `DATE-OBS` are copies of one
-capture, as the Origin saves its masters:
+against the lights': gain or ISO for bias and darks, dark exposure and a
+sensor temperature 5 °C or more away, the flat's filter and frame size.
+Files sharing one `DATE-OBS` are copies of one capture, as the Origin saves
+its masters. Bias and dark pixels give two more notes: a dark whose median
+level sits below the bias's at the same gain was recorded with another
+offset, so dark − bias (which scaling or optimising a dark needs) is
+negative, as on every Celestron Origin session checked; a dark above it
+gives the typical pixel's dark current.
 
 ```
 Calibration frames against the lights (20 s, gain/ISO 200, 15.6 °C, filter Nebula)
-  Type  Files                          Taken       Exp s   Gain/ISO  Temp °C  Filter  Issues
+  Type  Files                          Taken       Exp s   Gain/ISO  Temp °C  Filter  Notes
   BIAS  5, 1 distinct, 9-frame master  2025-10-17  0.001   200       30.6     -       -
-  DARK  5, 1 distinct, 9-frame master  2025-10-17  30      200       30.4     -       none at 20 s, so scaled by exposure; 14.8 °C warmer
+  DARK  5, 1 distinct, 9-frame master  2025-10-17  30      200       30.4     -       none at 20 s, so scaled by exposure; 14.8 °C warmer; 123 ADU below the bias, so dark − bias (to scale or optimise it) is negative
   FLAT  1, 30-frame master             2025-10-23  0.0589  23        27.1     Clear   none for filter Nebula
 ```
 
@@ -294,8 +298,12 @@ subs would do better, for the same total time:
   pixel's noise in electrons (same-colour neighbours two apart in a row,
   differenced, so gradients and nebulae cancel) gives the shot-noise rate
   B = (σ² − RN²)/t, and a sub of t seconds keeps √(B / (B + RN²/t)) of
-  the SNR. Read noise comes from `-read-noise` or a preset, which applies
-  only at the gain setting it was measured at. The Origin Mark II's preset,
+  the SNR. Read noise comes from `-read-noise`, else the session's bias
+  frames at the lights' gain setting, else a preset for the camera at that
+  setting. Two separate bias frames give it exactly: the noise of their
+  difference over √2, which cancels the sensor's fixed pattern. A master
+  of N frames (`NCOMBINE`/`NSTACK`) only bounds it, at √N times its pixel
+  noise, pattern included. The Origin Mark II's preset,
   1.1 e⁻ at ISO 1000, is an upper bound from its 9-frame bias master
   (astro-recommender uses a vendor sheet's 2.15 e⁻); the original Origin's,
   1.6 e⁻ at ISO 200, comes the same way. The rule of thumb is

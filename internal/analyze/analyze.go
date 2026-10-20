@@ -35,6 +35,9 @@ type Result struct {
 	// NoiseE is the noise of one raw pixel in electrons: read noise plus
 	// the shot noise of sky, target and dark current. NaN without a gain.
 	NoiseE float64
+	// Gain is EGAIN or -gain in e⁻ per raw pixel's ADU, NaN when unknown:
+	// it converts calibration frames' ADU too.
+	Gain float64
 	// Sky gradient: the fitted plane's range across the frame in ADU, and
 	// the direction it rises toward, degrees counter-clockwise from +x.
 	Gradient, GradAngle float64
@@ -105,7 +108,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 		Meta: img.Meta, Bg: bg, Std: std, Noise: noise,
 		FWHM: nan, FWHMArc: nan, Ecc: nan, Resid: nan, SNR: nan, PSFSNR: nan, PSFSW: nan,
 		SNRW: snrw, Gradient: gradient, GradAngle: gradAngle,
-		NoiseE: electrons(img.PixNoise, img.Gain),
+		NoiseE: electrons(img.PixNoise, img.Gain), Gain: electrons(1, img.Gain),
 	}
 	r.SunAlt, r.MoonAlt, r.MoonIllum, r.MoonSep = ephemeris(img.Meta)
 	r.Sky = skyColour(img.Colour)

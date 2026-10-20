@@ -300,7 +300,7 @@ func TestSubLength(t *testing.T) {
 		frames = append(frames, Frame{Result: r})
 	}
 	var b bytes.Buffer
-	SubLength(&b, frames, 0)
+	SubLength(&b, frames, 0, "")
 	for _, want := range []string{"read noise 1.1 e⁻ (≤ Celestron", "  10 s     97.1%                 1.9 / 1.9 px\n", "15 s", "← now"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, b.String())
@@ -308,7 +308,7 @@ func TestSubLength(t *testing.T) {
 	}
 	b.Reset()
 	frames[0].Result.Setting = 120 // another gain: the preset no longer applies
-	SubLength(&b, frames[:1], 0)
+	SubLength(&b, frames[:1], 0, "")
 	if !strings.Contains(b.String(), "set -read-noise") {
 		t.Errorf("unknown read noise:\n%s", b.String())
 	}
@@ -318,13 +318,13 @@ func TestCalibration(t *testing.T) {
 	light := analyze.Result{}
 	light.Exp, light.Setting, light.Temp, light.Filter, light.Size = 20, 200, 15, "Nebula", [2]int{3056, 2048}
 	frames := []Frame{{Result: light}, {Result: light}}
-	cal := func(typ string, exp, setting, temp float64, filter string, w int) fits.Meta {
-		return fits.Meta{
+	cal := func(typ string, exp, setting, temp float64, filter string, w int) Calib {
+		return Calib{Image: fits.Image{Meta: fits.Meta{
 			Type: typ, Exp: exp, Setting: setting, Temp: temp, Filter: filter, Size: [2]int{w, 2048},
 			Date: "2025-10-17T21:32:13", Stack: 9,
-		}
+		}}}
 	}
-	calib := []fits.Meta{
+	calib := []Calib{
 		cal(fits.Bias, 0.001, 200, 30, "", 3056), cal(fits.Bias, 0.001, 200, 30, "", 3056),
 		cal(fits.Dark, 30, 500, 30.4, "", 3056),
 		cal(fits.Flat, 0.0589399, 23, 27, "Clear", 3000),
@@ -366,5 +366,64 @@ func TestFocusDrift(t *testing.T) {
 	}
 	if s := focusDrift(frames); s != "" {
 		t.Errorf("seeing reported as focus drift: %q", s)
+	}
+}
+
+func TestPedestal(t *testing.T) {
+	frame := func(typ string, level, noise float64) Calib {
+		return Calib{Image: fits.Image{Level: level, PixNoise: noise, Meta: fits.Meta{Type: typ, Exp: 30, Setting: 200}}}
+	}
+	biases := []Calib{frame(fits.Bias, 4990, 30)}
+	if got := pedestal([]Calib{frame(fits.Dark, 4868, 71)}, biases, 0.0165); !strings.HasPrefix(got, "122 ADU below the bias") {
+		t.Errorf("dark below its bias: %q", got)
+	}
+	// 30 ADU over 30 s at 0.0165 e⁻/ADU.
+	if got := pedestal([]Calib{frame(fits.Dark, 5020, 71)}, biases, 0.0165); got != "dark current 0.017 e⁻/s per pixel" {
+		t.Errorf("dark above its bias: %q", got)
+	}
+	// Below by less than the bias noise: nothing to say.
+	if got := pedestal([]Calib{frame(fits.Dark, 4980, 71)}, biases, 0.0165); got != "" {
+		t.Errorf("dark at its bias: %q", got)
+	}
+	other := frame(fits.Dark, 4000, 71) // another ISO: no bias to compare
+	other.Image.Meta.Setting = 500
+	if got := pedestal([]Calib{other}, biases, 0.0165); got != "" {
+		t.Errorf("dark at another ISO: %q", got)
+	}
+}
+
+func TestBiasReadNoise(t *testing.T) {
+	light := analyze.Result{Gain: 0.0165,
+		Setting: 200}
+	frames := []Frame{{Result: light}}
+	bias := func(path, date string, stack, noise float64) Calib {
+		return Calib{Path: path, Image: fits.Image{PixNoise: noise, Meta: fits.Meta{Type: fits.Bias, Setting: 200, Date: date, Stack: stack}}}
+	}
+	pair := func(a, b string) (float64, error) {
+		if a == "a" && b == "b" {
+			return 60, nil
+		}
+
+		return math.NaN(), nil
+	}
+	nan := math.NaN()
+	// Two separate frames: their difference, not the noisier single frames.
+	rn, src := BiasReadNoise(frames, []Calib{bias("a", "d1", nan, 70), bias("b", "d2", nan, 70)}, pair)
+	if !(math.Abs(rn-60*0.0165) < 1e-12) || !strings.Contains(src, "difference") {
+		t.Errorf("pair: %v e⁻ %q", rn, src)
+	}
+	// Copies of a 9-frame master (one DATE-OBS): √9 × its pixel noise.
+	rn, src = BiasReadNoise(frames, []Calib{bias("a", "d1", 9, 30.4), bias("b", "d1", 9, 30.4)}, pair)
+	if !(math.Abs(rn-3*30.4*0.0165) < 1e-12) || src != "≤, from this session's 9-frame bias master" {
+		t.Errorf("master: %v e⁻ %q", rn, src)
+	}
+	other := bias("a", "d1", 9, 30.4) // bias at another ISO: unknown
+	other.Image.Meta.Setting = 500
+	if rn, _ := BiasReadNoise(frames, []Calib{other}, pair); !math.IsNaN(rn) {
+		t.Errorf("other ISO: %v", rn)
+	}
+	frames[0].Result.Gain = nan // no gain: unknown
+	if rn, _ := BiasReadNoise(frames, []Calib{bias("a", "d1", 9, 30.4)}, pair); !math.IsNaN(rn) {
+		t.Errorf("no gain: %v", rn)
 	}
 }

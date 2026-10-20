@@ -91,17 +91,17 @@ func presetReadNoise(m fits.Meta) (float64, string) {
 
 // SubLength compares sub lengths per filter: the SNR read noise leaves at
 // each, from the measured per-pixel noise, and the corner smear of field
-// rotation, from consecutive plate solutions. readNoise (e⁻) overrides the
-// camera preset when positive.
-func SubLength(w io.Writer, frames []Frame, readNoise float64) {
+// rotation, from consecutive plate solutions. Read noise rn (e⁻), from src
+// (-read-noise or bias frames), overrides the camera preset when positive.
+func SubLength(w io.Writer, frames []Frame, rn float64, src string) {
 	groups := byFilter(frames)
 	for _, idx := range groups {
 		sub := subset(frames, idx)
-		subLength(w, sub, filterLabel(sub, groups), readNoise)
+		subLength(w, sub, filterLabel(sub, groups), rn, src)
 	}
 }
 
-func subLength(w io.Writer, frames []Frame, label string, rn float64) {
+func subLength(w io.Writer, frames []Frame, label string, rn float64, src string) {
 	var exps, vars, fwhm []float64
 	for _, f := range frames {
 		r := f.Result
@@ -119,7 +119,6 @@ func subLength(w io.Writer, frames []Frame, label string, rn float64) {
 		return
 	}
 	t := stats.MedianOf(exps)
-	src := "-read-noise"
 	if !(rn > 0) {
 		rn, src = presetReadNoise(frames[0].Result.Meta)
 	}

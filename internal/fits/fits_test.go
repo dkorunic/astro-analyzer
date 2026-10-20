@@ -6,6 +6,7 @@ package fits_test
 import (
 	"errors"
 	"math"
+	"math/rand/v2"
 	"path/filepath"
 	"testing"
 
@@ -420,5 +421,33 @@ func TestCFAColour(t *testing.T) {
 		if m := img.Meta; m.Bayer != cards[0].Value || m.BayerFlip != (i == 1) {
 			t.Errorf("%v: Bayer %q, flip %v", cards, m.Bayer, m.BayerFlip)
 		}
+	}
+}
+
+// TestPairNoise checks two bias frames sharing a fixed pattern: Load's
+// single-frame noise includes the pattern, their difference does not.
+func TestPairNoise(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	pattern := make([]float64, synth.W*synth.H)
+	for i := range pattern {
+		pattern[i] = 1000 + 20*rng.NormFloat64() // offset non-uniformity
+	}
+	var paths [2]string
+	for k := range paths {
+		pix := make([]float64, len(pattern))
+		for i, p := range pattern {
+			pix[i] = p + 10*rng.NormFloat64() // read noise
+		}
+		paths[k] = filepath.Join(t.TempDir(), "b.fits")
+		if err := synth.WriteFITS(paths[k], pix, fitsio.Card{Name: "IMAGETYP", Value: "BIAS"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	img, err := fits.Load(paths[0])
+	if !errors.Is(err, fits.ErrNotLight) || !(math.Abs(img.Level-1000) < 2) || !(img.PixNoise > 20) {
+		t.Errorf("bias: level %v, pixel noise %v (pattern included), error %v", img.Level, img.PixNoise, err)
+	}
+	if rn, err := fits.PairNoise(paths[0], paths[1]); err != nil || !(math.Abs(rn-10) < 0.5) {
+		t.Errorf("PairNoise = %v, %v; want 10", rn, err)
 	}
 }

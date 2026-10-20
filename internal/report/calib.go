@@ -23,6 +23,13 @@ import (
 // roughly doubles every 5–7 °C on CMOS sensors, so this is about 2×.
 const warmerDark = 5
 
+// Calib is a calibration frame: its path and what fits.Load read of it
+// (header, and for bias and darks PixNoise and Level), without pixels.
+type Calib struct {
+	Path  string
+	Image fits.Image
+}
+
 // headers summarises one set of frames: distinct exposures, gain or ISO
 // settings, filters and DATE-OBS values, the median sensor temperature and
 // frame sizes.
@@ -59,10 +66,11 @@ func summarise(ms []fits.Meta) headers {
 }
 
 // Calibration compares the calibration frames' headers with the lights':
-// frame size, gain or ISO, dark exposure and temperature, flat filter. It
-// reads no calibration pixels. Files with one DATE-OBS are copies of one
-// capture: Celestron Origin saves each bias and dark master several times.
-func Calibration(w io.Writer, frames []Frame, calib []fits.Meta) {
+// frame size, gain or ISO, dark exposure and temperature, flat filter; and
+// the darks' level with the bias's (see pedestal). Files with one DATE-OBS
+// are copies of one capture: Celestron Origin saves each bias and dark
+// master several times.
+func Calibration(w io.Writer, frames []Frame, calib []Calib) {
 	if len(frames) == 0 || len(calib) == 0 {
 		return
 	}
@@ -77,14 +85,24 @@ func Calibration(w io.Writer, frames []Frame, calib []fits.Meta) {
 	}
 	fmt.Fprintln(w, ")")
 
-	byType := map[string][]fits.Meta{}
-	for _, m := range calib {
-		byType[m.Type] = append(byType[m.Type], m)
+	byType := map[string][]Calib{}
+	for _, c := range calib {
+		byType[c.Image.Meta.Type] = append(byType[c.Image.Meta.Type], c)
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  Type\tFiles\tTaken\tExp s\tGain/ISO\tTemp °C\tFilter\tIssues")
+	fmt.Fprintln(tw, "  Type\tFiles\tTaken\tExp s\tGain/ISO\tTemp °C\tFilter\tNotes")
 	for _, t := range slices.Sorted(maps.Keys(byType)) {
-		c := summarise(byType[t])
+		c := summarise(metas(byType[t]))
+		notes := issues(t, c, light)
+		if t == fits.Dark {
+			gain := math.NaN()
+			if slices.Equal(c.settings, light.settings) {
+				gain = lightGain(frames)
+			}
+			if n := pedestal(byType[fits.Dark], byType[fits.Bias], gain); n != "" {
+				notes = append(notes, n)
+			}
+		}
 		files := strconv.Itoa(len(byType[t]))
 		if len(c.dates) < len(byType[t]) {
 			files += fmt.Sprintf(", %d distinct", len(c.dates))
@@ -100,7 +118,7 @@ func Calibration(w io.Writer, frames []Frame, calib []fits.Meta) {
 			}
 		}
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", t, files, taken, values(c.exps), values(c.settings),
-			format(c.temp, 1), cmp.Or(strings.Join(c.filters, "/"), "-"), cmp.Or(strings.Join(issues(t, c, light), "; "), "-"))
+			format(c.temp, 1), cmp.Or(strings.Join(c.filters, "/"), "-"), cmp.Or(strings.Join(notes, "; "), "-"))
 	}
 	tw.Flush()
 	var missing []string
@@ -150,6 +168,107 @@ func issues(t string, c, light headers) []string {
 	}
 
 	return out
+}
+
+// pedestal compares the darks' median level with that of the bias frames
+// at the same gain or ISO. Dark current only adds, so a dark below its bias
+// was recorded with another offset, and dark − bias, which scaling or
+// optimising a dark needs, is negative (Celestron Origin: 120–410 ADU below,
+// as originstack also found). Above it, the difference over the exposure is
+// a typical pixel's dark current, given the gain in e⁻/ADU.
+func pedestal(darks, biases []Calib, gain float64) string {
+	var dl, de, bl, bn []float64
+	setting := darks[0].Image.Meta.Setting
+	for _, d := range darks {
+		if d.Image.Level != 0 && same(d.Image.Meta.Setting, setting) {
+			dl, de = append(dl, d.Image.Level), append(de, d.Image.Meta.Exp)
+		}
+	}
+	for _, b := range biases {
+		if b.Image.Level != 0 && same(b.Image.Meta.Setting, setting) {
+			bl, bn = append(bl, b.Image.Level), append(bn, b.Image.PixNoise)
+		}
+	}
+	if len(dl) == 0 || len(bl) == 0 {
+		return ""
+	}
+	d := stats.MedianOf(dl) - stats.MedianOf(bl)
+	switch t := stats.MedianOf(de); {
+	case d < -stats.MedianOf(bn):
+		return fmt.Sprintf("%.0f ADU below the bias, so dark − bias (to scale or optimise it) is negative", -d)
+	case d > 0 && gain > 0 && t > 0:
+		return fmt.Sprintf("dark current %.2g e⁻/s per pixel", d*gain/t)
+	}
+
+	return ""
+}
+
+// BiasReadNoise is the read noise in e⁻ from the session's bias frames at
+// the lights' gain or ISO, converted with the lights' gain, and where it
+// came from; NaN without such frames or a gain. Two separate frames give it
+// exactly (fits.PairNoise, called as pair). A master of N frames bounds it
+// at √N times its pixel noise, which still holds the fixed pattern: the
+// Celestron Origin presets came this way.
+func BiasReadNoise(frames []Frame, calib []Calib, pair func(a, b string) (float64, error)) (float64, string) {
+	gain := lightGain(frames)
+	if len(frames) == 0 || !(gain > 0) {
+		return math.NaN(), ""
+	}
+	setting := frames[0].Result.Setting
+	var singles []Calib
+	bound, n := math.Inf(1), 0.0
+	for _, c := range calib {
+		m := c.Image.Meta
+		if m.Type != fits.Bias || !same(m.Setting, setting) || !(c.Image.PixNoise > 0) {
+			continue
+		}
+		k := 1.0
+		if m.Stack > 1 {
+			k = m.Stack
+		} else if m.Date != "" && !slices.ContainsFunc(singles, func(s Calib) bool { return s.Image.Meta.Date == m.Date }) {
+			singles = append(singles, c)
+		}
+		if b := math.Sqrt(k) * c.Image.PixNoise; b < bound {
+			bound, n = b, k
+		}
+	}
+	if len(singles) >= 2 {
+		if rn, err := pair(singles[0].Path, singles[1].Path); err == nil && rn > 0 {
+			return rn * gain, "from the difference of two bias frames"
+		}
+	}
+	if math.IsInf(bound, 1) {
+		return math.NaN(), ""
+	}
+	if n > 1 {
+		return bound * gain, fmt.Sprintf("≤, from this session's %g-frame bias master", n)
+	}
+
+	return bound * gain, "≤, from this session's bias frame"
+}
+
+// lightGain is the lights' median gain in e⁻/ADU, NaN when unknown.
+func lightGain(frames []Frame) float64 {
+	var g []float64
+	for _, f := range frames {
+		if f.Result.Gain > 0 {
+			g = append(g, f.Result.Gain)
+		}
+	}
+
+	return stats.MedianOf(g)
+}
+
+// same compares gain settings; two unknown ones match.
+func same(a, b float64) bool { return a == b || math.IsNaN(a) && math.IsNaN(b) }
+
+func metas(cs []Calib) []fits.Meta {
+	ms := make([]fits.Meta, len(cs))
+	for i, c := range cs {
+		ms[i] = c.Image.Meta
+	}
+
+	return ms
 }
 
 // appendKnown appends v unless it is NaN or already present.

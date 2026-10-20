@@ -123,8 +123,10 @@ by the default run.
   `camera_profile.py` over 31 sessions of another unit). `Load` divides by
   4.5. Its bias/dark files cannot give read noise from pairs: identical copies.
 - `fits.Load` returns the header `Meta` (with `Type`) alongside
-  `ErrNotLight`; `report.Calibration` compares those headers with the
-  lights'. `Stack` (master lights, `NCOMBINE` > 1) is skipped, not listed.
+  `ErrNotLight`, plus `PixNoise` and `Level` for bias and darks (pixels are
+  not kept); `report.Calibration` compares them with the lights'. Origin
+  darks sit 120–410 ADU *below* their bias: no dark current is measurable.
+  Bias read noise uses the lights' `Result.Gain` (bias headers lack EGAIN). `Stack` (master lights, `NCOMBINE` > 1) is skipped, not listed.
   PixInsight writes `IMAGETYP = 'Master Light'`: matching on "LIGHT" alone
   measured a WBPP master as a sub.
 - Per-pixel noise in electrons comes from raw same-colour neighbours
