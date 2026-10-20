@@ -63,8 +63,11 @@ astro-analyzer [flags] file.fits|dir...
 Pass files, directories (searched recursively for `.fits`, `.fit` and `.fts`;
 unreadable subdirectories are skipped with a warning, hidden files such as
 macOS `._*` AppleDouble files are ignored, and a file reached twice is
-measured once), or both. Calibration frames (`IMAGETYP` of BIAS, DARK or FLAT) are skipped
-automatically. Frames are measured in parallel on all CPU cores; on an
+measured once), or both. Only light subs are measured: bias, dark, flat and
+dark-flat frames (`IMAGETYP` in its usual spellings, or `EXPTIME` 0) and
+stacks (`Master Light`, or `NCOMBINE`/`NSTACK`/`STACKCNT` above 1) are
+skipped and counted on stderr. Celestron Origin labels some flats `LIGHT`,
+so on Origin frames a file name starting with bias, dark or flat decides. Frames are measured in parallel on all CPU cores; on an
 interactive terminal a spinner shows the directory scan and then the frames
 measured so far.
 
@@ -120,9 +123,25 @@ Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 28 min unflagged, over 2 nigh
   2026-10-16  682     20:11–00:20  4.75     6262.5      80.1 ←    33%       24%      108°       0
 ```
 
+When the directories hold calibration frames, their headers are checked
+against the lights' (no calibration pixels are read): gain or ISO for bias
+and darks, dark exposure and a sensor temperature 5 °C or more away, the
+flat's filter and frame size. Files sharing one `DATE-OBS` are copies of one
+capture, as the Origin saves its masters:
+
+```
+Calibration frames against the lights (20 s, gain/ISO 200, 15.6 °C, filter Nebula)
+  Type  Files                          Taken       Exp s   Gain/ISO  Temp °C  Filter  Issues
+  BIAS  5, 1 distinct, 9-frame master  2025-10-17  0.001   200       30.6     -       -
+  DARK  5, 1 distinct, 9-frame master  2025-10-17  30      200       30.4     -       none at 20 s, so scaled by exposure; 14.8 °C warmer
+  FLAT  1, 30-frame master             2025-10-23  0.0589  23        27.1     Clear   none for filter Nebula
+```
+
 Then a session summary per filter, naming the best unflagged frame by wFWHM
 as the registration reference (as Siril picks one), with a trend line per
-metric in time order:
+metric in time order. When FWHM follows sensor temperature (rank correlation
+beyond ±0.5 over at least 1 °C and 8 frames, after dividing out the seeing's
+airmass^0.6), a line suggests focus drift:
 
 ```
 Session: 1340 frames, 28 flagged
@@ -277,8 +296,9 @@ subs would do better, for the same total time:
   B = (σ² − RN²)/t, and a sub of t seconds keeps √(B / (B + RN²/t)) of
   the SNR. Read noise comes from `-read-noise` or a preset, which applies
   only at the gain setting it was measured at. The Origin Mark II's preset,
-  1.1 e⁻, is an upper bound from its 9-frame bias master
-  (astro-recommender uses a vendor sheet's 2.15 e⁻). The rule of thumb is
+  1.1 e⁻ at ISO 1000, is an upper bound from its 9-frame bias master
+  (astro-recommender uses a vendor sheet's 2.15 e⁻); the original Origin's,
+  1.6 e⁻ at ISO 200, comes the same way. The rule of thumb is
   that 5% is an acceptable cost (Robin Glover, 2019).
 - **Field rotation** of an alt-az mount turns the field during each sub,
   smearing corner stars tangentially by r·ω·t. The rate ω comes from
@@ -347,9 +367,11 @@ Unknown values print as `-`, are empty in CSV and are omitted keys in JSON.
 - **SNR** uses PixInsight's AperturePhotometry error model, with a local sky
   annulus: `SNR = flux / √(n·σ² + n²·σ²/n_sky + flux/gain)`. Gain is per raw
   pixel, so a 2×2 superpixel uses four times the gain. Float data normalised
-  to [0, 1] is no longer in ADU, so its `EGAIN` is ignored. Celestron Origin
-  writes `EGAIN` per ADC count but stores each count as 25 ADU (every pixel
-  a multiple of 25), so its gain is divided by that step.
+  to [0, 1] is no longer in ADU, so its `EGAIN` is ignored. The Celestron
+  Origin Mark II writes `EGAIN` per ADC count but stores each count as 25
+  ADU (every pixel a multiple of 25), so its gain is divided by that step.
+  The original Origin's (`Origin178`) `EGAIN` is 4.5× its measured gain
+  (0.0742 against 0.0162–0.0165 e⁻/ADU at ISO 200), so it is divided by 4.5.
 - **PSF fitting**: stars with SNR ≥ 20 are fitted with an elliptical, rotated
   profile by Levenberg–Marquardt. The model is integrated over each pixel's
   area, so undersampled stars of ~2 px are measured correctly. FWHM is the

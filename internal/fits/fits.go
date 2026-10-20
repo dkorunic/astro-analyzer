@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -55,7 +56,9 @@ type Meta struct {
 	// Bayer is BAYERPAT as written. BayerFlip is set when the data matches
 	// it read from the other end (the top row), not the first stored row:
 	// see cfaSamples.
-	Bayer              string
+	Bayer string
+	// Type is the frame type (Light, Bias, Dark...): see frameType.
+	Type               string
 	WCS                WCS    // plate solution, for drizzle dither analysis
 	Size               [2]int // sensor pixels, before Bayer binning
 	Exp, Temp, Alt     float64
@@ -64,8 +67,12 @@ type Meta struct {
 	Aperture, FocalLen float64 // mm
 	Lat, Lon           float64 // site, degrees, east positive
 	RA, Dec            float64 // target (frame centre), degrees
-	CFA                bool    // one-shot-colour (Bayer) sensor
-	BayerFlip          bool
+	// Stack is how many frames an integrated image combines (NCOMBINE,
+	// NSTACK, STACKCNT); NaN for a single exposure. Celestron Origin's bias
+	// and dark files are 9-frame masters.
+	Stack     float64
+	CFA       bool // one-shot-colour (Bayer) sensor
+	BayerFlip bool
 }
 
 // Load reads the first 2D/3D image HDU, applies BSCALE/BZERO, averages colour
@@ -90,9 +97,9 @@ func Load(path string) (Image, error) {
 			continue
 		}
 		hdr := hdu.Header()
-		// N.I.N.A. writes LIGHT, MaxIm DL "Light Frame"; no IMAGETYP means assume light.
-		if t := str(hdr, "IMAGETYP"); t != "" && !strings.Contains(strings.ToUpper(t), "LIGHT") {
-			return Image{}, ErrNotLight
+		if t := frameType(filepath.Base(path), hdr); t != Light {
+			// The header is enough to check calibration frames against the lights.
+			return Image{Meta: meta(hdr, axes, t)}, ErrNotLight
 		}
 		bscale, ok := num(hdr, "BSCALE")
 		if !ok {
@@ -134,6 +141,15 @@ func Load(path string) (Image, error) {
 		}
 		img.PixNoise = noise
 		g, _ := num(hdr, "EGAIN")
+		// The original Origin's values step by 6.25 ADU (gaps of 6 and 7), so
+		// step finds 1, and its EGAIN is 4.5× the photon-transfer gain: 0.0742
+		// at ISO 200 against 0.0162 (consecutive raw lights, unit 7a8cfd) and
+		// 0.0165 (originstack camera_profile.py, 31 sessions, unit 932f56); at
+		// ISO 500 0.0297 against 0.0064. ponytail: one ratio for every ISO,
+		// 3% high at ISO 500.
+		if strings.HasPrefix(str(hdr, "CAMERA"), "Origin178") {
+			g /= 4.5
+		}
 		img.Gain = max(g, 0) / adu
 		img.Range = math.Exp2(float64(hdr.Bitpix())) - 1
 		// Float data normalised to [0, 1] (PixInsight) is no longer in ADU,
@@ -145,60 +161,132 @@ func Load(path string) (Image, error) {
 			}
 		}
 
-		img.Meta = Meta{
-			Date:      str(hdr, "DATE-OBS"),
-			Time:      obsTime(hdr),
-			Filter:    str(hdr, "FILTER"),
-			Object:    str(hdr, "OBJECT"),
-			Telescope: str(hdr, "TELESCOP"),
-			Camera:    str(hdr, "INSTRUME", "CAMERA"),
-			Exp:       first(hdr, "EXPTIME", "EXPOSURE"),
-			Setting:   first(hdr, "GAIN", "ISOSPEED"),
-			Temp:      first(hdr, "CCD-TEMP"),
-			// Not ALTITUDE: that is the observing site's elevation in metres.
-			Alt:      first(hdr, "CENTALT", "OBJCTALT"),
-			Aperture: first(hdr, "APTDIA", "APERTURE"),
-			FocalLen: first(hdr, "FOCALLEN"),
-			// ponytail: numeric degrees only; sexagesimal strings
-			// ("+45 49 38", MaxIm DL) read as unknown.
-			Lat:       first(hdr, "SITELAT", "LATITUDE", "OBSGEO-B"),
-			Lon:       first(hdr, "SITELONG", "LONGITUD", "OBSGEO-L"),
-			RA:        first(hdr, "CRVAL1", "RA"),
-			Dec:       first(hdr, "CRVAL2", "DEC"),
-			Size:      [2]int{w, h},
-			WCS:       readWCS(hdr),
-			CFA:       planes == 1 && hdr.Get("BAYERPAT") != nil,
-			Bayer:     strings.ToUpper(str(hdr, "BAYERPAT")),
-			BayerFlip: flip,
-		}
-		// XPIXSZ already includes binning per the FITS convention (MaxIm DL, N.I.N.A.).
-		px, _ := num(hdr, "XPIXSZ")
-		fl, _ := num(hdr, "FOCALLEN")
-		cd := img.Meta.WCS.CD
-		det := cd[0][0]*cd[1][1] - cd[0][1]*cd[1][0]
-		// A plate solve measures the scale; FOCALLEN is nominal and often off
-		// by 1–2%. An unsolved CD (mount pointing) is nominal too, so it
-		// ranks after XPIXSZ/FOCALLEN. The CD matrix ranks before a bare
-		// CDELT2: with CD cards present, CDELT is ignored (Greisen &
-		// Calabretta 2002, §2.1.2), so it may be stale.
-		if img.Meta.WCS.OK && det != 0 {
-			img.Meta.Plate = math.Sqrt(math.Abs(det)) * 3600
-		} else if px > 0 && fl > 0 {
-			img.Meta.Plate = 206.265 * px / fl
-		} else if det != 0 {
-			img.Meta.Plate = math.Sqrt(math.Abs(det)) * 3600
-		} else if c2, ok := num(hdr, "CDELT2"); ok {
-			img.Meta.Plate = math.Abs(c2) * 3600
-		}
-		// ponytail: plane-parallel airmass, inaccurate below ~20° altitude
-		if am, ok := num(hdr, "AIRMASS"); math.IsNaN(img.Meta.Alt) && ok && am >= 1 {
-			img.Meta.Alt = math.Asin(1/am) * 180 / math.Pi
-		}
+		img.Meta = meta(hdr, axes, Light)
+		img.Meta.BayerFlip = flip
 
 		return img, nil
 	}
 
 	return Image{}, ErrNoImage
+}
+
+// Frame types from frameType.
+const (
+	Light    = "LIGHT"
+	Bias     = "BIAS"
+	Dark     = "DARK"
+	Flat     = "FLAT"
+	DarkFlat = "DARKFLAT"
+	Stack    = "STACK" // an integrated image, not a sub: a master light or a live stack
+)
+
+// frameType reads IMAGETYP in its usual spellings (N.I.N.A. "LIGHT", MaxIm DL
+// "Light Frame", "Offset", "ZERO", IRAF "object", PixInsight "Master Dark");
+// no IMAGETYP means a light. A light that combines several frames (NCOMBINE,
+// NSTACK, STACKCNT) is a stack, and a light with zero exposure a bias. Some
+// Celestron Origin flats say IMAGETYP = 'LIGHT', so on Origin the file name
+// (flat.fits, dark0009.fits, bias0009.fits) decides first (originstack
+// frame_discovery.py:133). An unknown IMAGETYP is returned upper-cased.
+func frameType(name string, hdr *fitsio.Header) string {
+	t := strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r
+		}
+
+		return -1
+	}, strings.ToUpper(str(hdr, "IMAGETYP")))
+	master := strings.HasPrefix(t, "MASTER")
+	t = strings.TrimPrefix(t, "MASTER")
+	if strings.HasPrefix(str(hdr, "CREATOR"), "Origin") {
+		name = strings.ToUpper(name)
+		for _, k := range []string{Bias, Dark, Flat} {
+			if strings.HasPrefix(name, k) {
+				t = k
+			}
+		}
+	}
+	switch {
+	case t == "", strings.HasPrefix(t, "LIGHT"), strings.HasPrefix(t, "OBJECT"), strings.HasPrefix(t, "SCIENCE"):
+		if master || first(hdr, "NCOMBINE", "NSTACK", "STACKCNT") > 1 {
+			return Stack
+		}
+		if first(hdr, "EXPTIME", "EXPOSURE") == 0 {
+			return Bias
+		}
+
+		return Light
+	case strings.HasPrefix(t, "DARKFLAT"), strings.HasPrefix(t, "FLATDARK"):
+		return DarkFlat
+	case strings.HasPrefix(t, Dark):
+		return Dark
+	case strings.HasPrefix(t, Flat):
+		return Flat
+	case strings.HasPrefix(t, Bias), strings.HasPrefix(t, "OFFSET"), strings.HasPrefix(t, "ZERO"):
+		return Bias
+	}
+
+	return t
+}
+
+// meta reads the observing context from the header; BayerFlip needs the
+// pixels and is left to the caller.
+func meta(hdr *fitsio.Header, axes []int, typ string) Meta {
+	planes := 1
+	for _, a := range axes[2:] {
+		planes *= a
+	}
+	m := Meta{
+		Type:      typ,
+		Stack:     first(hdr, "NCOMBINE", "NSTACK", "STACKCNT"),
+		Date:      str(hdr, "DATE-OBS"),
+		Time:      obsTime(hdr),
+		Filter:    str(hdr, "FILTER"),
+		Object:    str(hdr, "OBJECT"),
+		Telescope: str(hdr, "TELESCOP"),
+		Camera:    str(hdr, "INSTRUME", "CAMERA"),
+		Exp:       first(hdr, "EXPTIME", "EXPOSURE"),
+		Setting:   first(hdr, "GAIN", "ISOSPEED"),
+		Temp:      first(hdr, "CCD-TEMP"),
+		// Not ALTITUDE: that is the observing site's elevation in metres.
+		Alt:      first(hdr, "CENTALT", "OBJCTALT"),
+		Aperture: first(hdr, "APTDIA", "APERTURE"),
+		FocalLen: first(hdr, "FOCALLEN"),
+		// ponytail: numeric degrees only; sexagesimal strings
+		// ("+45 49 38", MaxIm DL) read as unknown.
+		Lat:   first(hdr, "SITELAT", "LATITUDE", "OBSGEO-B"),
+		Lon:   first(hdr, "SITELONG", "LONGITUD", "OBSGEO-L"),
+		RA:    first(hdr, "CRVAL1", "RA"),
+		Dec:   first(hdr, "CRVAL2", "DEC"),
+		Size:  [2]int{axes[0], axes[1]},
+		WCS:   readWCS(hdr),
+		CFA:   planes == 1 && hdr.Get("BAYERPAT") != nil,
+		Bayer: strings.ToUpper(str(hdr, "BAYERPAT")),
+	}
+	// XPIXSZ already includes binning per the FITS convention (MaxIm DL, N.I.N.A.).
+	px, _ := num(hdr, "XPIXSZ")
+	fl, _ := num(hdr, "FOCALLEN")
+	cd := m.WCS.CD
+	det := cd[0][0]*cd[1][1] - cd[0][1]*cd[1][0]
+	// A plate solve measures the scale; FOCALLEN is nominal and often off
+	// by 1–2%. An unsolved CD (mount pointing) is nominal too, so it
+	// ranks after XPIXSZ/FOCALLEN. The CD matrix ranks before a bare
+	// CDELT2: with CD cards present, CDELT is ignored (Greisen &
+	// Calabretta 2002, §2.1.2), so it may be stale.
+	if m.WCS.OK && det != 0 {
+		m.Plate = math.Sqrt(math.Abs(det)) * 3600
+	} else if px > 0 && fl > 0 {
+		m.Plate = 206.265 * px / fl
+	} else if det != 0 {
+		m.Plate = math.Sqrt(math.Abs(det)) * 3600
+	} else if c2, ok := num(hdr, "CDELT2"); ok {
+		m.Plate = math.Abs(c2) * 3600
+	}
+	// ponytail: plane-parallel airmass, inaccurate below ~20° altitude
+	if am, ok := num(hdr, "AIRMASS"); math.IsNaN(m.Alt) && ok && am >= 1 {
+		m.Alt = math.Asin(1/am) * 180 / math.Pi
+	}
+
+	return m
 }
 
 // pixNoise is the noise of one raw pixel in ADU: the robust σ (16th–84th

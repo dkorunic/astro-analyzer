@@ -313,3 +313,58 @@ func TestSubLength(t *testing.T) {
 		t.Errorf("unknown read noise:\n%s", b.String())
 	}
 }
+
+func TestCalibration(t *testing.T) {
+	light := analyze.Result{}
+	light.Exp, light.Setting, light.Temp, light.Filter, light.Size = 20, 200, 15, "Nebula", [2]int{3056, 2048}
+	frames := []Frame{{Result: light}, {Result: light}}
+	cal := func(typ string, exp, setting, temp float64, filter string, w int) fits.Meta {
+		return fits.Meta{
+			Type: typ, Exp: exp, Setting: setting, Temp: temp, Filter: filter, Size: [2]int{w, 2048},
+			Date: "2025-10-17T21:32:13", Stack: 9,
+		}
+	}
+	calib := []fits.Meta{
+		cal(fits.Bias, 0.001, 200, 30, "", 3056), cal(fits.Bias, 0.001, 200, 30, "", 3056),
+		cal(fits.Dark, 30, 500, 30.4, "", 3056),
+		cal(fits.Flat, 0.0589399, 23, 27, "Clear", 3000),
+	}
+	var b bytes.Buffer
+	Calibration(&b, frames, calib)
+	for _, want := range []string{
+		"BIAS  2, 1 distinct, 9-frame master  2025-10-17  0.001",
+		"none at gain/ISO 200; none at 20 s, so scaled by exposure; 15.4 °C warmer",
+		"0.0589", "size 3000 × 2048; none for filter Nebula",
+	} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, b.String())
+		}
+	}
+	b.Reset()
+	Calibration(&b, frames, nil) // lights only: no section
+	if b.Len() != 0 {
+		t.Errorf("no calibration frames printed:\n%s", b.String())
+	}
+}
+
+func TestFocusDrift(t *testing.T) {
+	var frames []Frame
+	for i := range 12 {
+		r := analyze.Result{FWHM: 3 + 0.1*float64(i)}
+		r.Temp, r.Alt = 20-0.5*float64(i), 60 // cooling 0.5 °C per frame
+
+		frames = append(frames, Frame{Result: r})
+	}
+	if s := focusDrift(frames); !strings.Contains(s, "rank correlation -1.00 over 5.5 °C") {
+		t.Errorf("FWHM rising as it cools: %q", s)
+	}
+	// The target setting from 70° to 37°, FWHM growing exactly as
+	// airmass^0.6: seeing, not focus.
+	for i := range frames {
+		frames[i].Result.Alt = 70 - 3*float64(i)
+		frames[i].Result.FWHM = 3 * math.Pow(1/math.Sin(frames[i].Result.Alt*math.Pi/180), 0.6)
+	}
+	if s := focusDrift(frames); s != "" {
+		t.Errorf("seeing reported as focus drift: %q", s)
+	}
+}

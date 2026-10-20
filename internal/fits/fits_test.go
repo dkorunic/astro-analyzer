@@ -81,13 +81,38 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-func TestNotLight(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "bias.fits")
-	if err := synth.WriteFITS(path, make([]float64, synth.W*synth.H), fitsio.Card{Name: "IMAGETYP", Value: "BIAS"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fits.Load(path); !errors.Is(err, fits.ErrNotLight) {
-		t.Errorf("Load(bias) error = %v, want ErrNotLight", err)
+func TestFrameType(t *testing.T) {
+	typ := func(v string) fitsio.Card { return fitsio.Card{Name: "IMAGETYP", Value: v} }
+	origin := fitsio.Card{Name: "CREATOR", Value: "Origin 1.3.5343"}
+	for _, c := range []struct {
+		name, want string
+		cards      []fitsio.Card
+	}{
+		{name: "a.fits", want: fits.Light},
+		{name: "a.fits", want: fits.Light, cards: []fitsio.Card{typ("Light Frame")}},
+		{name: "a.fits", want: fits.Light, cards: []fitsio.Card{typ("object")}},
+		{name: "a.fits", want: fits.Bias, cards: []fitsio.Card{typ("BIAS")}},
+		{name: "a.fits", want: fits.Bias, cards: []fitsio.Card{typ("Offset")}},
+		{name: "a.fits", want: fits.Bias, cards: []fitsio.Card{{Name: "EXPTIME", Value: 0.0}}},
+		{name: "a.fits", want: fits.Dark, cards: []fitsio.Card{typ("Master Dark"), {Name: "NCOMBINE", Value: 20}}},
+		{name: "a.fits", want: fits.DarkFlat, cards: []fitsio.Card{typ("Dark Flat")}},
+		{name: "a.fits", want: fits.Stack, cards: []fitsio.Card{typ("LIGHT"), {Name: "NCOMBINE", Value: 20}}},
+		{name: "a.fits", want: fits.Stack, cards: []fitsio.Card{typ("Master Light")}},
+		{name: "a.fits", want: "TRICOLOR", cards: []fitsio.Card{typ("Tricolor")}},
+		// Origin flats may say LIGHT; the name decides, but only on Origin.
+		{name: "flat.fits", want: fits.Flat, cards: []fitsio.Card{origin, typ("LIGHT")}},
+		{name: "flat.fits", want: fits.Light, cards: []fitsio.Card{typ("LIGHT")}},
+		{name: "Light0001.fits", want: fits.Light, cards: []fitsio.Card{origin, typ("LIGHT")}},
+	} {
+		path := filepath.Join(t.TempDir(), c.name)
+		if err := synth.WriteFITS(path, synth.StarField(4, 4), c.cards...); err != nil {
+			t.Fatal(err)
+		}
+		img, err := fits.Load(path)
+		if got := img.Meta.Type; got != c.want || (err == nil) != (c.want == fits.Light) ||
+			(err != nil && !errors.Is(err, fits.ErrNotLight)) {
+			t.Errorf("%s %v: type %q, error %v; want %q", c.name, c.cards, got, err, c.want)
+		}
 	}
 }
 

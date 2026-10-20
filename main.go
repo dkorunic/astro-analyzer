@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -108,6 +109,7 @@ func main() {
 			img, err := fits.Load(f)
 			if err != nil {
 				errs[i] = err
+				res[i].Meta = img.Meta // a calibration frame's header
 
 				return
 			}
@@ -125,11 +127,16 @@ func main() {
 		fmt.Fprintf(os.Stderr, "✓ measured %d frames in %.1f s\n", measured.Load(), time.Since(start).Seconds())
 	}
 
-	exit, skipped := 0, 0
+	exit := 0
+	skipped := map[string]int{}
 	var frames []report.Frame
+	var calib []fits.Meta
 	for i, f := range files {
 		if errors.Is(errs[i], fits.ErrNotLight) {
-			skipped++
+			skipped[res[i].Type]++
+			if res[i].Type != fits.Stack {
+				calib = append(calib, res[i].Meta)
+			}
 
 			continue
 		}
@@ -141,8 +148,12 @@ func main() {
 		}
 		frames = append(frames, report.Frame{Path: f, Result: res[i]})
 	}
-	if skipped > 0 {
-		fmt.Fprintf(os.Stderr, "skipped %d calibration frames (IMAGETYP not LIGHT)\n", skipped)
+	if len(skipped) > 0 {
+		var parts []string
+		for _, t := range slices.Sorted(maps.Keys(skipped)) {
+			parts = append(parts, fmt.Sprintf("%d %s", skipped[t], t))
+		}
+		fmt.Fprintf(os.Stderr, "skipped frames that are not light subs: %s\n", strings.Join(parts, ", "))
 	}
 	// Chronological order makes the trend lines meaningful; ISO dates sort as strings.
 	if !slices.ContainsFunc(frames, func(f report.Frame) bool { return f.Result.Date == "" }) {
@@ -166,6 +177,7 @@ func main() {
 	default:
 		report.Table(os.Stdout, frames)
 		report.Overview(os.Stdout, frames)
+		report.Calibration(os.Stdout, frames, calib)
 		report.Summary(os.Stdout, frames)
 		report.Field(os.Stdout, frames)
 		report.Coverage(os.Stdout, frames)

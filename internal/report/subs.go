@@ -47,9 +47,12 @@ type readNoisePreset struct {
 // where one contains another. The Origin Mark II's is measured: its
 // 9-frame bias master has a spatial σ of 32 ADU, and with 25 ADU per count
 // and EGAIN 0.2793 that bounds one frame's read noise at 3·32·0.0112 =
-// 1.1 e⁻ (astro-recommender's 2.15 is a vendor sheet's guess).
+// 1.1 e⁻ (astro-recommender's 2.15 is a vendor sheet's guess). The original
+// Origin's the same way: σ 32.2 ADU (biasStandardDeviation in its
+// dark0009.json), 3·32.2·0.0165 = 1.6 e⁻.
 var readNoisePresets = []readNoisePreset{
 	{camera: "Origin678C", label: "≤ Celestron Origin Mark II at ISO 1000, from its bias master", setting: 1000, rn: 1.1},
+	{camera: "Origin178", label: "≤ Celestron Origin at ISO 200, from its bias master", setting: 200, rn: 1.6},
 	{camera: "ASI294MM", label: "IMX492 at gain 120", setting: 120, rn: 1.8},
 	{camera: "ASI294", label: "IMX294 at gain 120", setting: 120, rn: 1.7},
 	{camera: "ASI2600", label: "IMX571 at gain 100", setting: 100, rn: 1.4},

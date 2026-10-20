@@ -198,3 +198,26 @@ func TestNoiseUnbiased(t *testing.T) {
 		t.Errorf("MRS %.3f, k-sigma %.3f, want %.0f", mrs, ks, sigma)
 	}
 }
+
+func TestSpearman(t *testing.T) {
+	nan := math.NaN()
+	for _, c := range []struct {
+		x, y []float64
+		want float64
+	}{
+		// Monotone but not linear, with an extreme value: still 1.
+		{x: []float64{1, 2, 3, 4, 5}, y: []float64{1, 4, 9, 16, 1000}, want: 1},
+		{x: []float64{1, 2, 3, 4}, y: []float64{8, 6, 4, 2}, want: -1},
+		// Ties take their mean rank: ranks (1.5,1.5,3,4) against (1,2,3,4).
+		{x: []float64{1, 1, 2, 3}, y: []float64{1, 2, 3, 4}, want: 4.5 / math.Sqrt(4.5*5)},
+		// NaN pairs are dropped, leaving a perfect correlation.
+		{x: []float64{1, nan, 3, 4}, y: []float64{2, 5, 6, 8}, want: 1},
+	} {
+		if got, _ := Spearman(c.x, c.y); !(math.Abs(got-c.want) < 1e-12) {
+			t.Errorf("Spearman(%v, %v) = %v, want %v", c.x, c.y, got, c.want)
+		}
+	}
+	if got, _ := Spearman([]float64{1, 2}, []float64{1, 2}); !math.IsNaN(got) {
+		t.Errorf("two pairs: %v, want NaN", got)
+	}
+}

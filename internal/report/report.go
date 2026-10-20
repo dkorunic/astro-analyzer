@@ -315,6 +315,9 @@ func summary(w io.Writer, frames []Frame, label string) {
 		fmt.Fprintf(w, "Reference frame for registration: %s (best wFWHM %.2f px, %d stars)\n",
 			filepath.Base(best.Path), best.WFWHM, best.Result.Stars)
 	}
+	if line := focusDrift(frames); line != "" {
+		fmt.Fprintln(w, line)
+	}
 	fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "Metric\tMedian\tσ (MAD)\tMin\tMax\tTrend")
@@ -329,6 +332,33 @@ func summary(w io.Writer, frames []Frame, label string) {
 			format(slices.Min(valid), m.prec), format(slices.Max(valid), m.prec), sparkline(v))
 	}
 	tw.Flush()
+}
+
+// focusDrift notes when FWHM follows sensor temperature: the optics shrink
+// as they cool and focus moves (originstack session_report.py:204 reports
+// |r| > 0.5). Temperature falls through the night as altitude changes, so
+// FWHM is first divided by airmass^0.6, the seeing's dependence on it
+// (Roddier 1981); without an altitude it is used as measured.
+//
+// ponytail: under 8 frames or a 1 °C span the correlation means nothing.
+func focusDrift(frames []Frame) string {
+	fwhm, temp := make([]float64, len(frames)), make([]float64, len(frames))
+	lo, hi := math.Inf(1), math.Inf(-1)
+	for i, f := range frames {
+		fwhm[i], temp[i] = f.Result.FWHM, f.Result.Temp
+		if a := f.Result.Alt; a > 0 { // false for NaN
+			fwhm[i] /= math.Pow(1/math.Sin(a*math.Pi/180), 0.6)
+		}
+		if !math.IsNaN(fwhm[i]) && !math.IsNaN(temp[i]) {
+			lo, hi = min(lo, temp[i]), max(hi, temp[i])
+		}
+	}
+	r, n := stats.Spearman(fwhm, temp)
+	if n < 8 || hi-lo < 1 || !(math.Abs(r) > 0.5) {
+		return ""
+	}
+
+	return fmt.Sprintf("FWHM follows sensor temperature (rank correlation %+.2f over %.1f °C, airmass removed): likely focus drift, refocus as it cools", r, hi-lo)
 }
 
 // CSV writes one row per frame at full precision; unknown values are empty.

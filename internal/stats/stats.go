@@ -6,6 +6,7 @@
 package stats
 
 import (
+	"cmp"
 	"math"
 	"slices"
 	"sort"
@@ -82,6 +83,52 @@ func Robust(v []float64) (float64, float64, int) {
 	slices.Sort(s)
 
 	return med, 1.4826 * Median(s), len(s)
+}
+
+// Spearman is the rank correlation of x and y over the pairs where both are
+// known, and the number of such pairs; NaN with fewer than 3. Ranks make a
+// few extreme frames (cloud, wind) count no more than any other.
+func Spearman(x, y []float64) (float64, int) {
+	var a, b []float64
+	for i := range x {
+		if !math.IsNaN(x[i]) && !math.IsNaN(y[i]) {
+			a, b = append(a, x[i]), append(b, y[i])
+		}
+	}
+	if len(a) < 3 {
+		return math.NaN(), len(a)
+	}
+	ra, rb := ranks(a), ranks(b)
+	m := float64(len(a)+1) / 2
+	var sab, saa, sbb float64
+	for i := range ra {
+		da, db := ra[i]-m, rb[i]-m
+		sab, saa, sbb = sab+da*db, saa+da*da, sbb+db*db
+	}
+
+	return sab / math.Sqrt(saa*sbb), len(a) // NaN when either is constant
+}
+
+// ranks returns 1-based ranks, ties sharing their mean rank.
+func ranks(v []float64) []float64 {
+	idx := make([]int, len(v))
+	for i := range idx {
+		idx[i] = i
+	}
+	slices.SortFunc(idx, func(i, j int) int { return cmp.Compare(v[i], v[j]) })
+	r := make([]float64, len(v))
+	for i := 0; i < len(idx); {
+		j := i
+		for j < len(idx) && v[idx[j]] == v[idx[i]] {
+			j++
+		}
+		for k := i; k < j; k++ {
+			r[idx[k]] = float64(i+j+1) / 2
+		}
+		i = j
+	}
+
+	return r
 }
 
 // Outliers marks values that deviate in the bad direction (+1 high, -1 low)

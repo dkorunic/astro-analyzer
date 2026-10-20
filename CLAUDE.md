@@ -29,7 +29,7 @@ Dependencies only point downward in this list:
 | Package | Role |
 |---|---|
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
-| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), session summary + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and read-noise presets (`subs.go`), CSV/JSON |
+| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration header check (`calib.go`), session summary + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and read-noise presets (`subs.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
 | `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
@@ -112,11 +112,21 @@ by the default run.
 - Celestron Origin (alt-az) frames rotate 100°+ per session (`CROTA2`); the
   first frame may have `ASTRSOLV = F` (mount pointing, not a plate solve).
   `readWCS` keeps its `CD` (plate scale) but sets `OK = false`.
-- Celestron Origin `EGAIN` is per ADC count, but stored pixels are counts
+- Celestron Origin Mark II (`Origin678C`) `EGAIN` is per ADC count, but stored pixels are counts
   × 25 (ISO 1000). `Load` divides by the step 99% of pixel values share (`step`; an exact GCD gives 5), on
   Origin only: photon transfer on a real session confirmed it (0.0095 vs
   0.0112 e⁻/ADU). Its bias and dark files are 9-frame masters (`NSTACK`),
   saved as identical copies.
+- The original Origin (`Origin178`) steps by 6.25 ADU (gaps of 6 and 7), so
+  `step` finds 1, and its `EGAIN` is 4.5× the two-point gain from consecutive
+  raw lights (0.0162 measured here; 0.0165 in originstack's
+  `camera_profile.py` over 31 sessions of another unit). `Load` divides by
+  4.5. Its bias/dark files cannot give read noise from pairs: identical copies.
+- `fits.Load` returns the header `Meta` (with `Type`) alongside
+  `ErrNotLight`; `report.Calibration` compares those headers with the
+  lights'. `Stack` (master lights, `NCOMBINE` > 1) is skipped, not listed.
+  PixInsight writes `IMAGETYP = 'Master Light'`: matching on "LIGHT" alone
+  measured a WBPP master as a sub.
 - Per-pixel noise in electrons comes from raw same-colour neighbours
   (`pixNoise`, before binning), not the binned MRS noise: on Origin frames
   2×2 binning lowers the noise only 1.7×, not 2×, so neighbouring raw
