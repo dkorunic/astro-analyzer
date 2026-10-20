@@ -23,7 +23,10 @@ type Result struct {
 	Stars         int
 	FWHM, FWHMArc float64 // median over fitted stars, original pixels / arcsec
 	Ecc, Resid    float64 // median over fitted stars
-	SNR           float64 // median over all detected stars
+	// HFD is ASTAP's half-flux diameter in original pixels, median over
+	// the stars it accepts: see hfd.
+	HFD float64
+	SNR float64 // median over all detected stars
 	// PSFSNR and PSFSW are PixInsight's PSF SNR and PSF Signal Weight,
 	// WBPP's default weight (BPP-Global.js:273): see psfSNR and psfSW.
 	PSFSNR, PSFSW float64
@@ -108,7 +111,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 	nan := math.NaN()
 	r := Result{
 		Meta: img.Meta, Bg: bg, Std: std, Noise: noise,
-		FWHM: nan, FWHMArc: nan, Ecc: nan, Resid: nan, SNR: nan, PSFSNR: nan, PSFSW: nan,
+		FWHM: nan, FWHMArc: nan, HFD: nan, Ecc: nan, Resid: nan, SNR: nan, PSFSNR: nan, PSFSW: nan,
 		SNRW: snrw, Gradient: gradient, GradAngle: gradAngle,
 		NoiseE: electrons(img.PixNoise, img.Gain), Gain: electrons(1, img.Gain),
 	}
@@ -137,7 +140,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 
 	visited := make([]bool, len(img.Pix))
 	var stars []star
-	var snrs, hot []float64
+	var snrs, hfds, hot []float64
 	for _, c := range cands {
 		if visited[c] {
 			continue
@@ -159,6 +162,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 		}
 		r.Stars++
 		snrs = append(snrs, snr)
+		hfds = append(hfds, hfd(img, c)*img.Scale)
 		if snr < minFitSNR {
 			continue
 		}
@@ -171,6 +175,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 	// bright stars cannot drag them the way they drag a mean. SNR spans
 	// orders of magnitude, so its mean would follow the brightest few stars.
 	r.SNR = stats.MedianOf(snrs)
+	r.HFD = stats.MedianOf(slices.DeleteFunc(hfds, math.IsNaN))
 	r.PSFSNR = psfSNR(stars, noise)
 	r.PSFSW = psfSW(stars, noise, mstar)
 	r.Hot = hotLevel(hot)

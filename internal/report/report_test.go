@@ -135,7 +135,7 @@ func TestFieldTilt(t *testing.T) {
 	Field(&b, frames)
 	for _, s := range []string{
 		"Field (filter L):",
-		"FWHM tilt 83% (corners 4.00–9.00 px), curvature +0% (corners vs centre)",
+		"FWHM tilt 83% extreme (corners 4.00–9.00 px), curvature +0% (corners vs centre)",
 		"Field (filter Ha):",
 		"FWHM tilt -, curvature +0%",
 	} {
@@ -422,6 +422,17 @@ func TestBiasReadNoise(t *testing.T) {
 	if !(math.Abs(rn-3*30.4*0.0165) < 1e-12) || src != "≤, from this session's 9-frame bias master" {
 		t.Errorf("master: %v e⁻ %q", rn, src)
 	}
+	// A PixInsight master of five copies of that master: its NCOMBINE
+	// overcounts, so the raw files' bound stands; alone, it is used.
+	wbpp := bias("m", "d2", 5, 30.4)
+	wbpp.Image.Meta.Master = true
+	rn, _ = BiasReadNoise(frames, []Calib{bias("a", "d1", 9, 30.4), wbpp}, pair)
+	if !(math.Abs(rn-3*30.4*0.0165) < 1e-12) {
+		t.Errorf("raw and master: %v e⁻, want the raw files' %v", rn, 3*30.4*0.0165)
+	}
+	if rn, src = BiasReadNoise(frames, []Calib{wbpp}, pair); !(math.Abs(rn-math.Sqrt(5)*30.4*0.0165) < 1e-12) {
+		t.Errorf("master alone: %v e⁻ %q", rn, src)
+	}
 	other := bias("a", "d1", 9, 30.4) // bias at another ISO: unknown
 	other.Image.Meta.Setting = 500
 	if rn, _ := BiasReadNoise(frames, []Calib{other}, pair); !math.IsNaN(rn) {
@@ -530,5 +541,18 @@ func TestRefocus(t *testing.T) {
 	}
 	if s := focusDrift(frames); !strings.Contains(s, "focuser temperature (rank correlation -1.00") {
 		t.Errorf("focusDrift with FOCTEMP: %q", s)
+	}
+}
+
+// TestTiltClass: a bound starts the class above it, as ASTAP's p < bound.
+func TestTiltClass(t *testing.T) {
+	for _, c := range []struct {
+		corner float64
+		want   string
+	}{{2.09, "none"}, {2.11, "almost none"}, {2.36, "moderate"}, {2.5, "severe"}, {3, "extreme"}} {
+		f := [9]float64{2, 2, 2, 2, 2, 2, 2, 2, c.corner}
+		if got := tilt(f); !strings.Contains(got, "% "+c.want+" (") {
+			t.Errorf("corner %.2f: %q, want %s", c.corner, got, c.want)
+		}
 	}
 }

@@ -55,6 +55,7 @@ var metrics = []metric{
 	{name: "FWHM px", key: "fwhm_px", prec: 2, bad: +1, get: func(f Frame) float64 { return f.Result.FWHM }},
 	{name: "wFWHM", key: "wfwhm", prec: 2, bad: 0, get: func(f Frame) float64 { return f.WFWHM }},                  // ranks frames; FWHM and Stars flag them
 	{name: "FWHM \"", key: "fwhm_arcsec", prec: 2, bad: 0, get: func(f Frame) float64 { return f.Result.FWHMArc }}, // same signal as FWHM px
+	{name: "HFD px", key: "hfd_px", prec: 2, bad: 0, get: func(f Frame) float64 { return f.Result.HFD }},           // same signal as FWHM px
 	{name: "Ecc", key: "eccentricity", prec: 2, bad: +1, get: func(f Frame) float64 { return f.Result.Ecc }},
 	{name: "Resid", key: "psf_residual", prec: 4, bad: +1, get: func(f Frame) float64 { return f.Result.Resid }},
 	{name: "SNR", key: "snr", prec: 1, bad: -1, get: func(f Frame) float64 { return f.Result.SNR }},
@@ -549,9 +550,22 @@ func tilt(fwhm [9]float64) string {
 	}
 	lo, hi := slices.Min(corners), slices.Max(corners)
 	med := stats.MedianOf(slices.DeleteFunc(slices.Clone(fwhm[:]), math.IsNaN))
+	p := (hi - lo) / med * 100
+	i, _ := slices.BinarySearch(tiltClass[:], p)
+	if i < len(tiltClass) && tiltClass[i] == p {
+		i++ // a bound belongs to the class above, as in ASTAP's p < bound
+	}
 
-	return fmt.Sprintf("tilt %.0f%% (corners %.2f–%.2f px)", (hi-lo)/med*100, lo, hi)
+	return fmt.Sprintf("tilt %.0f%% %s (corners %.2f–%.2f px)", p, tiltName[i], lo, hi)
 }
+
+// tiltClass bounds ASTAP's tilt classes (unit_inspector_plot.pas:488-498),
+// in % of the median star size. ASTAP compares HFD in three areas of the
+// inner ring, not the corners, so the classes read a little stricter here.
+var (
+	tiltClass = [...]float64{5, 10, 15, 20, 30}
+	tiltName  = [...]string{"none", "almost none", "mild", "moderate", "severe", "extreme"}
+)
 
 // AxisGlyph draws the mean doubled-angle vector (x, y) as a line in the
 // direction of elongation, or "·" when stars are round or point every way.

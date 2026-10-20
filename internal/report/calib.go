@@ -157,7 +157,7 @@ func findings(frames []Frame, byType map[string][]Calib, rn float64, pairGain fu
 	atSetting := func(cs []Calib) []Calib {
 		return slices.DeleteFunc(slices.Clone(cs), func(c Calib) bool { return !same(c.Image.Meta.Setting, setting) })
 	}
-	biases, darks := atSetting(byType[fits.Bias]), atSetting(byType[fits.Dark])
+	biases, darks := atSetting(raws(byType[fits.Bias])), atSetting(raws(byType[fits.Dark]))
 	if len(biases) > 0 {
 		add("Bias", biasBanding(biases))
 	}
@@ -166,7 +166,7 @@ func findings(frames []Frame, byType map[string][]Calib, rn float64, pairGain fu
 			func(s string) bool { return s == "" })
 		add("Dark", strings.Join(notes, "; "))
 	}
-	for _, f := range byType[fits.Flat] {
+	for _, f := range raws(byType[fits.Flat]) {
 		add("Flat", flatNote(f))
 
 		break // ponytail: the first flat; sessions hold one master per filter
@@ -434,13 +434,15 @@ func BiasReadNoise(frames []Frame, calib []Calib, pair func(a, b string) (float6
 		return math.NaN(), ""
 	}
 	setting := frames[0].Result.Setting
+	biases := raws(slices.DeleteFunc(slices.Clone(calib), func(c Calib) bool {
+		m := c.Image.Meta
+
+		return m.Type != fits.Bias || !same(m.Setting, setting) || !(c.Image.PixNoise > 0)
+	}))
 	var singles []Calib
 	bound, n := math.Inf(1), 0.0
-	for _, c := range calib {
+	for _, c := range biases {
 		m := c.Image.Meta
-		if m.Type != fits.Bias || !same(m.Setting, setting) || !(c.Image.PixNoise > 0) {
-			continue
-		}
 		k := 1.0
 		if m.Stack > 1 {
 			k = m.Stack
@@ -464,6 +466,18 @@ func BiasReadNoise(frames []Frame, calib []Calib, pair func(a, b string) (float6
 	}
 
 	return bound * gain, "≤, from this session's bias frame"
+}
+
+// raws drops PixInsight masters (IMAGETYP Master...) when cs holds other
+// frames: WBPP builds its masters from the session's own files, so they
+// count those twice, and their NCOMBINE overcounts when the files were
+// copies (Origin saves one master several times).
+func raws(cs []Calib) []Calib {
+	if !slices.ContainsFunc(cs, func(c Calib) bool { return !c.Image.Meta.Master }) {
+		return cs
+	}
+
+	return slices.DeleteFunc(slices.Clone(cs), func(c Calib) bool { return c.Image.Meta.Master })
 }
 
 // lightGain is the lights' median gain in e⁻/ADU, NaN when unknown.

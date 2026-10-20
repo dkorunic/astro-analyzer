@@ -324,3 +324,18 @@ func TestSNRW(t *testing.T) {
 		t.Errorf("SNRW = %.4f, want %.4f", r.SNRW, want)
 	}
 }
+
+// TestHFD: Miyashita's HFD of a Gaussian star is twice its mean radius,
+// 2σ√(π/2). Integrating over the pixel adds 1/12 px² to σ², and ASTAP's
+// bilinear sampling around an off-pixel centroid 1/6 more (the mean of
+// f(1−f) per axis), so it reads 7–15% over FWHM on these stars, as ASTAP does.
+func TestHFD(t *testing.T) {
+	for _, fwhm := range []float64{3, 4, 6} {
+		r := analyze.Frame(synth.Image(synth.StarField(fwhm, fwhm)), 5, psf.Gaussian)
+		sigma := fwhm / (2 * math.Sqrt(2*math.Ln2))
+		want := 2 * math.Sqrt(sigma*sigma+0.25) * math.Sqrt(math.Pi/2)
+		if !near(r.HFD, want, 0.02) {
+			t.Errorf("fwhm %.1f: hfd %.3f, want %.3f", fwhm, r.HFD, want)
+		}
+	}
+}

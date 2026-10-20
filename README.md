@@ -5,7 +5,8 @@
 [![License: MIT](https://img.shields.io/github/license/dkorunic/astro-analyzer)](LICENSE)
 
 A fast, local command-line tool that measures the quality of astrophotography
-FITS subframes: star count, FWHM, eccentricity, SNR, sky background and
+subframes (FITS, fpack `.fz`, XISF, TIFF and camera RAW): star count, FWHM,
+ASTAP's HFD, eccentricity, SNR, sky background and
 noise, gradient, hot pixels and PixInsight's PSF SNR, PSF Signal Weight
 and SNRW frame weights. It flags bad frames, shows how a session evolved over the
 night (and warns of focus drift with temperature), sums integration time
@@ -63,16 +64,30 @@ Plain `go build .` works too. It needs Go 1.27+.
 ## Usage
 
 ```sh
-astro-analyzer [flags] file.fits|dir...
+astro-analyzer [flags] file|dir...
 ```
 
-Pass files, directories (searched recursively for `.fits`, `.fit` and `.fts`;
-unreadable subdirectories are skipped with a warning, hidden files such as
-macOS `._*` AppleDouble files are ignored, and a file reached twice is
-measured once), or both. Only light subs are measured: bias, dark, flat and
-dark-flat frames (`IMAGETYP` in its usual spellings, or `EXPTIME` 0) and
-stacks (`Master Light`, or `NCOMBINE`/`NSTACK`/`STACKCNT` above 1) are
-skipped and counted on stderr. Celestron Origin labels some flats `LIGHT`,
+Pass files, directories (searched recursively; unreadable subdirectories
+are skipped with a warning, hidden files such as macOS `._*` AppleDouble
+files are ignored, and a file reached twice is measured once), or both.
+Only light subs are measured: bias, dark, flat and dark-flat frames
+(`IMAGETYP` in its usual spellings, or `EXPTIME` 0), stacks (`Master Light`,
+or `NCOMBINE`/`NSTACK`/`STACKCNT` above 1) and processed XISF images (no
+FITS keywords at all) are skipped and counted on stderr.
+
+| Format | Extensions | Notes |
+|---|---|---|
+| FITS | `.fits`, `.fit`, `.fts` | The first image HDU |
+| fpack | `.fz` (`.fits.fz`) | Tile-compressed FITS: `RICE_1`, `GZIP_1`, `GZIP_2` and `NOCOMPRESS`, quantized floats restored with their subtractive dithering. Not `HCOMPRESS_1` or `PLIO_1` |
+| XISF | `.xisf` | PixInsight's format, uncompressed or `zlib`, `lz4`, `lz4hc` or `zstd`, with or without byte shuffling. Its FITS keywords are the header; a 2×2 `ColorFilterArray` gives `BAYERPAT`. Rows are read top first, as PixInsight reads FITS |
+| TIFF | `.tif`, `.tiff` | 8- and 16-bit grey or RGB (no float samples). A FITS header in `ImageDescription`, as ASTAP saves one, is read. Only when named: directory searches skip TIFF, as in a session folder it is usually a processed export |
+| Camera RAW | `.cr2`, `.nef`, `.arw`, `.raf`, `.orf`, `.rw2`, `.pef`, `.dng` and more | Through `dcraw` on the `PATH`, as ASTAP does: the undemosaiced mosaic (`-D -4 -t 0`) and its timestamp, camera, ISO, exposure and CFA pattern. dcraw 9.28 does not read Canon CR3. DSLR frames carry no frame type, so calibration frames read as lights |
+
+PixInsight's master bias, dark and flat (`IMAGETYP = 'Master …'`, as WBPP
+writes into its `master` folder) count as calibration frames, their [0, 1]
+samples put back on the 16-bit scale. When the session also holds the raw
+calibration files, the masters are only listed: WBPP built them from those
+files, and counting both would count them twice. Celestron Origin labels some flats `LIGHT`,
 so on Origin frames a file name starting with bias, dark or flat decides.
 Frames are measured in parallel on up to 6 CPU cores (about 100 MB each;
 `GOMAXPROCS` lowers it; `GOGC` defaults to 50); on an interactive terminal
@@ -103,9 +118,9 @@ astro-analyzer -reject ~/astro/M27 | xargs -I{} mv {} ~/astro/M27/rejected/
 One row per frame, sorted by `DATE-OBS`:
 
 ```
-File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Sky mag  Hot     Trails  Flags
-Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  19.72    7436.3  0       
-Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  19.72    7427.5  0       Resid
+File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  HFD px  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Sky mag  Hot     Trails  Flags
+Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    5.74    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  19.72    7436.3  0       
+Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    5.97    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  19.72    7427.5  0       Resid
 ```
 
 Then the equipment and integration time per filter, with one row per
@@ -199,6 +214,7 @@ Reference frame for registration: Light1135.fits (best wFWHM 3.46 px, 4445 stars
 Metric      Median    σ (MAD)  Min       Max      Trend
 Stars       3997      458.1    3196      4521     ▅▄▃▂▂▂▂▂▂▃▃▃▄▄▅▅▆▆▆▇▇▇▇██████▅▂▂▁▁▁▁▂▂▂▃▃▅▅▅▆▆▆▇▇▇████▇▆▇▇▆▇
 FWHM "      6.25      1.293    4.12      11.45    ▅▇███▇▆▆▆▆▅▅▄▄▄▄▄▄▃▃▃▃▃▂▂▂▃▃▃▃▅▅▅▅▅▅▄▄▄▃▃▃▂▂▂▃▂▁▂▁▁▁▁▂▂▄▃▃▄▃
+HFD px      6.34      0.861    5.07      9.69     ▅▇███▇▇▆▇▆▆▆▅▄▄▄▄▄▄▃▂▂▂▂▂▂▂▃▃▄▆▅▆▅▆▅▅▅▅▃▃▃▃▃▃▃▂▁▁▁▁▁▁▂▂▃▃▃▄▂
 PSF SNR     0.000411  0.00012  0.000166  0.00115  ▁▂▃▃▄▃▃▃▃▃▃▅▅▄▃▃▄▅▄▄▄▆▆▆▅▅▆█▇▄▁▂▂▂▂▂▂▂▂▂▂▂▁▂▂▃▂▁▃▃▃▃▃▃▄▇█▄▆▄
 PSFSW       0.000579  0.00036  0.000156  0.00112  ▁▁▁▁▁▁▂▂▂▂▂▃▃▃▄▄▅▅▅▅▆▇▇█▇▇▇██▄▁▂▂▂▂▂▂▂▃▃▃▄▄▄▅▅▅▅▆▇██▇▆▆▆▇▆▅▆
 Background  6225.0    222.39   5968.8    6800.0   ▆▆▆▆▆▅▅▄▄▄▄▄▃▃▃▂▂▂▂▂▂▂▂▁▁▁▁▁▁▅██▇▇▇▇▇▇▆▆▅▄▄▄▃▃▃▃▃▃▂▂▂▂▂▂▂▂▂▂
@@ -213,14 +229,16 @@ Field: median FWHM px, eccentricity and elongation axis (top = last FITS row)
 top     4.07  0.85 │  5.01  0.69 │  6.86  0.60 ╱
 middle  4.48  0.78 │  5.75  0.60 ·  7.98  0.59 ╱
 bottom  5.24  0.73 ╲  6.68  0.59 ─  9.35  0.63 ╱
-FWHM tilt 92% (corners 4.07–9.35 px), curvature +5% (corners vs centre), right vs left +78%, top vs bottom -25%
+FWHM tilt 92% extreme (corners 4.07–9.35 px), curvature +5% (corners vs centre), right vs left +78%, top vs bottom -25%
 ```
 
 Reading the field map:
 
 - **Tilt**: one side or corner is consistently wider (above: the bottom right).
   The tilt figure is the best-to-worst corner spread relative to the median
-  FWHM; curvature cannot show it, as opposite corners cancel there.
+  FWHM, classed as ASTAP does (none under 5%, then almost none, mild,
+  moderate, severe from 20% and extreme from 30%); curvature cannot show
+  it, as opposite corners cancel there.
 - **Coma or field curvature**: all corners worse than the centre, with elongation pointing radially.
 - **Tracking, guiding or wind**: every cell elongated in the same direction.
 
@@ -394,6 +412,7 @@ Sub length: 15 s subs
 | Stars | Stars detected above `-sigma` × noise over the local background |
 | FWHM px, FWHM " | Median FWHM of fitted stars, in original sensor pixels and arcseconds. Arcseconds use the plate solve's scale, else `XPIXSZ` and `FOCALLEN`, else `CDELT2` |
 | wFWHM | Siril's weighted FWHM, as its default global registration computes it: FWHM·(1 + 2·(N_ref − N)/N_ref), with N the frame's stars and N_ref the most of any frame through the same filter. A frame that lost stars to haze or cloud ranks worse than its FWHM alone says; `-best` ranks by it |
+| HFD px | ASTAP's half-flux diameter in original pixels, the median over the stars ASTAP's analysis accepts (HFD 0.8–30 px, its SNR over 10): twice the flux-weighted mean distance from the star's centroid, summed out to where its pixels fall below 3σ (Miyashita's method, ASTAP's `HFD`). It needs no PSF model, so it holds for defocused doughnut stars, and it is the figure ASTAP, SGP and N.I.N.A. (HFR, half of it) show. It reads above FWHM: by 7–15% on a Gaussian star of 3–6 px, as ASTAP's bilinear sampling and the pixel's width add to it, and more on stars with Moffat wings |
 | Ecc | Median eccentricity: 0 is round, above ~0.5 is visibly elongated |
 | Resid | Median PSF fit residual, as PixInsight's StarResidual: the Winsorized mean \|data − model\| as a fraction of the full sample range (65535 for 16-bit data); high values mean doubled or distorted stars |
 | SNR | Median per-star aperture SNR. Not PixInsight's SNR, which is SNRW |
@@ -414,14 +433,15 @@ Unknown values print as `-`, are empty in CSV and are omitted keys in JSON.
 `-csv` and `-json` write one record per frame with only these per-frame
 metrics, not the session sections. Keys: `file`, `date`, `filter`,
 `exptime`, `ccd_temp`, `altitude`, `moon_alt`, `sun_alt`, `stars`,
-`fwhm_px`, `wfwhm`, `fwhm_arcsec`, `eccentricity`, `psf_residual`, `snr`,
+`fwhm_px`, `wfwhm`, `fwhm_arcsec`, `hfd_px`, `eccentricity`, `psf_residual`, `snr`,
 `psf_snr`, `psf_signal_weight`, `snr_weight`, `background`, `stddev`,
 `noise_mrs`, `gradient`, `sky_r`, `sky_g`, `sky_b`, `sky_mag`, `hot_pixel_level`,
 `trails` and `flags`.
 
 ## How it measures
 
-- **Loading**: BZERO/BSCALE are applied. One-shot-colour frames (`BAYERPAT`)
+- **Loading**: BZERO/BSCALE are applied (other formats are read into the
+  same header and samples: see Usage). One-shot-colour frames (`BAYERPAT`)
   are averaged into 2×2 superpixels so the Bayer grid does not fragment
   stars, and FWHM is reported back in original pixels. RGB cubes are averaged.
   Integer pixels equal to `BLANK`, NaN float pixels, and zero pixels
@@ -485,7 +505,11 @@ width: for a true FWHM F it reads about √(F² + 0.46), +6% at 2 px, +2.5% at
 
 ## Limitations
 
-- Only uncompressed image HDUs are read (no tile-compressed `.fits.fz`).
+- fpack's `HCOMPRESS_1` and `PLIO_1`, float TIFF, and RAW formats dcraw
+  9.28 predates (Canon CR3) are not read.
+- A directory search also measures the calibrated or registered XISF subs
+  WBPP leaves in its output folder, alongside the raw ones: point it at the
+  raw frames, or delete WBPP's intermediate folders first.
 - Brighter stars measure wider on many real systems; FWHM therefore depends
   somewhat on the SNR ≥ 20 cut-off. Compare frames within a session rather
   than absolute values between different tools.

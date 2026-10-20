@@ -38,7 +38,7 @@ func MStar(pix []float32, w, h, block int) float64 {
 			}
 			grid[j*nx+i] = math.NaN() // blank: pixels near it are skipped
 			if len(buf) > 0 {
-				grid[j*nx+i] = selectMedian(buf)
+				grid[j*nx+i] = SelectMedian(buf)
 			}
 		}
 	}
@@ -71,12 +71,12 @@ func MStar(pix []float32, w, h, block int) float64 {
 		return math.NaN()
 	}
 
-	return selectMedian(r)
+	return SelectMedian(r)
 }
 
-// selectMedian is Median without sorting: it reorders v, which must be
+// SelectMedian is Median without sorting: it reorders v, which must be
 // non-empty and hold no NaNs.
-func selectMedian(v []float64) float64 {
+func SelectMedian(v []float64) float64 {
 	k := len(v) / 2
 	m := Select(v, k)
 	if len(v)%2 == 0 {
@@ -105,7 +105,7 @@ func TwoSidedScale(pix []float32, lo, hi float64) float64 {
 	if len(s) == 0 {
 		return math.NaN()
 	}
-	c := selectMedian(s)
+	c := SelectMedian(s)
 	// Three passes, as PixInsight sets the range clipping three times; each
 	// range is built from the deviation the previous pass measured.
 	loA, hiB := lo, hi

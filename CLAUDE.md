@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-Go CLI that measures FITS astrophotography subframes (stars, FWHM,
+Go CLI that measures astrophotography subframes (FITS, fpack `.fz`, XISF,
+TIFF, camera RAW via dcraw: stars, FWHM, ASTAP's HFD,
 eccentricity, SNR and PixInsight's PSF SNR / PSFSW / SNRW weights, sky
 background, brightness and gradient, wavelet noise, hot pixels, satellite
 trails), flags
@@ -37,11 +38,11 @@ Dependencies only point downward in this list:
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
 | `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and camera presets (`subs.go`), chip QE, colour response and dark current, sky brightness and Bortle class (`sky.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
-| `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, PSF SNR/PSFSW/SNRW, gradient, hot level, trails (`trails.go`), raw pixel noise, Sun/Moon, 3×3 field cells |
+| `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, ASTAP HFD (`hfd.go`), medians, PSF SNR/PSFSW/SNRW, gradient, hot level, trails (`trails.go`), raw pixel noise, Sun/Moon, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
 | `internal/sky` | Low-precision Sun and Moon positions (Astronomical Almanac), altitude, illumination |
 | `internal/stats` | Median/MAD, outlier rule, Spearman, Chauvenet (RCR), sigma-clipped sky, wavelet MRS noise + background map, sky gradient plane, M* and two-sided scale (PSFSW, SNRW) |
-| `internal/fits` | FITS loading, BZERO/BSCALE, frame type, Origin ADU step and gain fixes, Bayer 2×2 binning and CFA sky, saturation mask, header metadata, TAN WCS, calibration pixel stats (`CalStats`), `PairNoise`/`PairGain` |
+| `internal/fits` | Loading behind `source` (header + sample reader): FITS, fpack tiles (`fpack.go`: Rice, GZIP_1/2, dithered floats), XISF (`xisf.go`: zlib/lz4/zstd via klauspost, own LZ4 block decoder), TIFF (`tiff.go`, x/image), RAW (`raw.go`, dcraw); fixtures in `testdata` from independent writers (`gen.py`). FITS loading, BZERO/BSCALE, frame type, Origin ADU step and gain fixes, Bayer 2×2 binning and CFA sky, saturation mask, header metadata, TAN WCS, calibration pixel stats (`CalStats`), `PairNoise`/`PairGain` |
 | `internal/synth` | Test-only helpers: synthetic star fields and a FITS writer |
 
 To add a per-frame metric: add the field to `analyze.Result`, compute it in
@@ -214,3 +215,23 @@ by the default run.
   ones on the filaments or cloud gradients. Blobs that fail the thin test
   go to `hough`, which must explain 80% of the blob: a disc's chord through
   its centre passes a peak test but not that one (`TestHough`).
+- **Other formats become a FITS header** (`header`, `card`): structural
+  cards are dropped and samples arrive physical. XISF, TIFF and RAW rows
+  stay in stored order (top first), as PixInsight reads FITS, so a FITS
+  file and its XISF copy measure byte for byte the same; checked with
+  every codec and fpack type on real Origin frames.
+- PixInsight calibration masters are [0, 1] floats: `toADU` multiplies
+  calibration frames (not lights) by 65535, else read noise came out
+  10⁻⁶ e⁻. WBPP's masters are built from the session's own files, so
+  `raws` drops masters when raw files of that type exist; on Origin the
+  WBPP master bias averages 5 *copies*, and its NCOMBINE gave a read-noise
+  "bound" 25% under the truth. An XISF with no FITS keywords is PixInsight
+  output (`Processed`), skipped like a stack. Directory walks skip TIFF.
+- `hfd` scales pixels to ASTAP's 0–65535 (`65535/Range`): its noise floor
+  of 1 and its SNR are in those units, so [0, 1] data gave no HFD at all.
+  On pixel-integrated Gaussians it reads 2σ_eff√(π/2) with σ_eff² = σ² + ¼
+  (pixel 1/12 + bilinear 1/6), as ASTAP does: `TestHFD`. The annulus
+  offsets are precomputed; scanning a 31×31 box per star cost 10%.
+- RAW: Coffin's `dcraw -D -4 -t 0 -c` (visible area, to stdout). LibRaw's
+  `unprocessed_raw` includes the masked borders and `dcraw_emu` has no
+  `-D`; dcraw 9.28 cannot read CR3.

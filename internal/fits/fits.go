@@ -104,6 +104,8 @@ type Meta struct {
 	Stack     float64
 	CFA       bool // one-shot-colour (Bayer) sensor
 	BayerFlip bool
+	// Master is set when IMAGETYP says Master (PixInsight's integrations).
+	Master bool
 }
 
 // Load reads the first 2D/3D image HDU, applies BSCALE/BZERO, averages colour
@@ -114,33 +116,35 @@ type Meta struct {
 // flats their PixNoise, Range and Cal without pixels. A dark is loaded in
 // full, as a light would be, plus its Cal.Level.
 func Load(path string) (Image, error) {
-	im, done, err := firstImage(path)
+	src, err := open(path)
 	if err != nil {
 		return Image{}, err
 	}
-	defer done()
-	hdr, axes := im.Header(), im.Header().Axes()
+	defer src.done()
+	hdr, axes := src.hdr, src.hdr.Axes()
 	w, h := axes[0], axes[1]
 	t := frameType(filepath.Base(path), hdr)
 	if t != Light && t != Dark {
 		img := Image{Meta: meta(hdr, axes, t), Range: math.Exp2(float64(hdr.Bitpix())) - 1}
 		if t == Bias || t == Flat {
-			pix, _, err := samples(im)
+			pix, _, err := src.read()
 			if err != nil {
 				return Image{}, err
 			}
+			img.Range = toADU(pix, hdr.Bitpix())
 			img.PixNoise, img.Cal = pixNoise(pix, w, h), calStats(t, pix, w, h, img.Range, img.Meta.CFA)
 		}
 
 		return img, ErrNotLight
 	}
-	pix, planes, err := samples(im)
+	pix, planes, err := src.read()
 	if err != nil {
 		return Image{}, err
 	}
 	img := Image{W: w, H: h, Pix: pix, Scale: 1}
 	var level float64 // a dark's, before binning makes a new Image
 	if t == Dark {
+		toADU(pix, hdr.Bitpix())
 		level = float64(rough(pix))
 	}
 	blankBorder(img.Pix, w, h)
@@ -195,6 +199,25 @@ func Load(path string) (Image, error) {
 	}
 
 	return img, nil
+}
+
+// toADU puts a calibration frame's samples normalized to [0, 1] (a
+// PixInsight master) back on the 16-bit scale PixInsight divided them by,
+// so they compare with raw frames' ADU, and returns the sample range.
+// Lights keep their scale: nothing is compared with them in ADU.
+//
+// ponytail: assumes 16-bit data, as Load does for float lights.
+func toADU(pix []float32, bitpix int) float64 {
+	if bitpix > 0 {
+		return math.Exp2(float64(bitpix)) - 1
+	}
+	if maxOf(pix) <= 1 {
+		for i := range pix {
+			pix[i] *= 65535
+		}
+	}
+
+	return 65535
 }
 
 // calStats measures a bias or flat frame's pixels (see CalStats).
@@ -325,32 +348,83 @@ func dust(pix []float32, w, h int) (int, float64) {
 	return n, deepest
 }
 
-// firstImage opens the first 2D/3D image HDU of path; done closes the file.
-func firstImage(path string) (fitsio.Image, func(), error) { //nolint:ireturn // fitsio's image HDU is an interface
+// source is one image in any supported format: its FITS header (made up
+// from the file's metadata for other formats) and a reader for its
+// samples, which returns them with BSCALE/BZERO applied and colour planes
+// averaged, and the plane count. done releases the file.
+type source struct {
+	hdr  *fitsio.Header
+	read func() ([]float32, int, error)
+	done func()
+}
+
+// Supported reports whether a directory walk should load name. TIFF is
+// left out, though Load reads it: in a session folder it is most often a
+// processed export, with no header to mark it as one. Name TIFF files on
+// the command line instead.
+func Supported(name string) bool {
+	switch ext := strings.ToLower(filepath.Ext(name)); ext {
+	case ".fits", ".fit", ".fts", ".fz", ".xisf":
+		return true
+	default:
+		return rawExt[ext]
+	}
+}
+
+// open reads path by its extension; anything else is taken for FITS.
+func open(path string) (source, error) {
+	switch ext := strings.ToLower(filepath.Ext(path)); {
+	case ext == ".xisf":
+		return openXISF(path)
+	case ext == ".tif", ext == ".tiff":
+		return openTIFF(path)
+	case rawExt[ext]:
+		return openRaw(path)
+	}
+
+	return openFITS(path)
+}
+
+// openFITS opens the first 2D/3D image HDU of path, or the first
+// tile-compressed (fpack) image.
+func openFITS(path string) (source, error) {
 	fh, err := os.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return source{}, err
 	}
 	f, err := fitsio.Open(bufio.NewReader(fh))
 	if err != nil {
 		fh.Close()
 
-		return nil, nil, err
+		return source{}, err
 	}
 	done := func() {
 		f.Close()
 		fh.Close()
 	}
 	for _, hdu := range f.HDUs() {
-		if im, ok := hdu.(fitsio.Image); ok {
+		switch hdu := hdu.(type) {
+		case fitsio.Image:
 			if axes := hdu.Header().Axes(); len(axes) >= 2 && axes[0]*axes[1] != 0 {
-				return im, done, nil
+				return source{hdr: hdu.Header(), read: func() ([]float32, int, error) { return samples(hdu) }, done: done}, nil
+			}
+		case *fitsio.Table:
+			if c := hdu.Header().Get("ZIMAGE"); c != nil && c.Value == true {
+				src, err := openTiled(hdu)
+				if err != nil {
+					done()
+
+					return source{}, err
+				}
+				src.done = done
+
+				return src, nil
 			}
 		}
 	}
 	done()
 
-	return nil, nil, ErrNoImage
+	return source{}, ErrNoImage
 }
 
 // samples reads im's pixels with BSCALE/BZERO applied and colour planes
@@ -380,13 +454,13 @@ func pair(a, b string) ([2][]float32, int, error) {
 	var pix [2][]float32
 	var w int
 	for i, p := range []string{a, b} {
-		im, done, err := firstImage(p)
+		src, err := open(p)
 		if err != nil {
 			return pix, 0, err
 		}
-		pix[i], _, err = samples(im)
-		w = im.Header().Axes()[0]
-		done()
+		pix[i], _, err = src.read()
+		w = src.hdr.Axes()[0]
+		src.done()
 		if err != nil {
 			return pix, 0, err
 		}
@@ -486,6 +560,8 @@ const (
 	Flat     = "FLAT"
 	DarkFlat = "DARKFLAT"
 	Stack    = "STACK" // an integrated image, not a sub: a master light or a live stack
+	// Processed is an XISF image without FITS keywords: see openXISF.
+	Processed = "PROCESSED"
 )
 
 // frameType reads IMAGETYP in its usual spellings (N.I.N.A. "LIGHT", MaxIm DL
@@ -572,6 +648,8 @@ func meta(hdr *fitsio.Header, axes []int, typ string) Meta {
 		WCS:   readWCS(hdr),
 		CFA:   planes == 1 && hdr.Get("BAYERPAT") != nil,
 		Bayer: strings.ToUpper(str(hdr, "BAYERPAT")),
+		// The prefix frameType strips.
+		Master: strings.HasPrefix(strings.ToUpper(str(hdr, "IMAGETYP")), "MASTER"),
 	}
 	// XPIXSZ already includes binning per the FITS convention (MaxIm DL, N.I.N.A.).
 	px, _ := num(hdr, "XPIXSZ")

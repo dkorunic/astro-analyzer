@@ -193,7 +193,7 @@ func collect(files []string, errs []error, res []analyze.Result, cals []report.C
 	for i, f := range files {
 		if errors.Is(errs[i], fits.ErrNotLight) {
 			skipped[cals[i].Image.Meta.Type]++
-			if cals[i].Image.Meta.Type != fits.Stack {
+			if t := cals[i].Image.Meta.Type; t != fits.Stack && t != fits.Processed {
 				calib = append(calib, cals[i])
 			}
 
@@ -329,11 +329,8 @@ func expand(args []string, progress func(found int)) ([]string, []error, error) 
 			if progress != nil {
 				progress(len(files))
 			}
-			switch strings.ToLower(filepath.Ext(p)) {
-			case ".fits", ".fit", ".fts":
-				if !d.IsDir() {
-					add(p)
-				}
+			if !d.IsDir() && fits.Supported(p) {
+				add(p)
 			}
 
 			return nil
