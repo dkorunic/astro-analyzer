@@ -73,9 +73,10 @@ measured once), or both. Only light subs are measured: bias, dark, flat and
 dark-flat frames (`IMAGETYP` in its usual spellings, or `EXPTIME` 0) and
 stacks (`Master Light`, or `NCOMBINE`/`NSTACK`/`STACKCNT` above 1) are
 skipped and counted on stderr. Celestron Origin labels some flats `LIGHT`,
-so on Origin frames a file name starting with bias, dark or flat decides. Frames are measured in parallel on all CPU cores; on an
-interactive terminal a spinner shows the directory scan and then the frames
-measured so far.
+so on Origin frames a file name starting with bias, dark or flat decides.
+Frames are measured in parallel on up to 6 CPU cores (about 100 MB each;
+`GOMAXPROCS` lowers it; `GOGC` defaults to 50); on an interactive terminal
+a spinner shows the directory scan and then the frames measured so far.
 
 | Flag | Default | Meaning |
 |---|---|---|

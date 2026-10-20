@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -97,7 +98,15 @@ func main() {
 	res := make([]analyze.Result, len(files))
 	errs := make([]error, len(files))
 	cals := make([]report.Calib, len(files))
-	sem := make(chan struct{}, runtime.NumCPU())
+	// ponytail: at most 6 frames in flight, ~100 MB each at GOGC 50 (674 MB on
+	// a 431-frame session); all 20 cores used 2.7 GB. Add a -j flag if users
+	// want more.
+	sem := make(chan struct{}, min(6, runtime.GOMAXPROCS(0)))
+	// GC is ~0% of CPU here; half the default heap headroom saves ~14% RSS
+	// for ~1% CPU. An explicit GOGC still wins.
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(50)
+	}
 	start := time.Now()
 	if tty {
 		stop = spin(func() string { return fmt.Sprintf("measuring: %d/%d frames", done.Load(), len(files)) })
