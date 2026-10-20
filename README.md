@@ -127,18 +127,43 @@ When the directories hold calibration frames, their headers are checked
 against the lights': gain or ISO for bias and darks, dark exposure and a
 sensor temperature 5 °C or more away, the flat's filter and frame size.
 Files sharing one `DATE-OBS` are copies of one capture, as the Origin saves
-its masters. Bias and dark pixels give two more notes: a dark whose median
-level sits below the bias's at the same gain was recorded with another
-offset, so dark − bias (which scaling or optimising a dark needs) is
-negative, as on every Celestron Origin session checked; a dark above it
-gives the typical pixel's dark current.
+its masters. Then what their pixels show:
+
+- **Bias**: row and column banding, against the pixel noise. In a master it
+  is fixed, so subtracting the master removes it.
+- **Dark**: a dark whose median level sits below the bias's at the same gain
+  was recorded with another offset, so dark − bias (which scaling or
+  optimising a dark needs) is negative, as on every Celestron Origin
+  session checked; above it, the difference gives the dark current. Its hot
+  pixels are measured exactly as the lights' (the Hot column) and compared,
+  also scaled to the lights' exposure: above 1 the dark subtracts more than
+  the lights hold and leaves dark pits, below 1 hot pixels remain. Hot
+  pixels follow sensor temperature, so a warmer dark reads higher.
+- **Flat**: level as a share of the sample range, clipped pixels, and dust
+  shadows (16-pixel blocks over 1% darker than their surroundings).
+- **Gain**: photon transfer on three pairs of neighbouring lights: half the
+  variance of their difference is one frame's temporal noise, and gain =
+  (signal − pedestal) / variance. The pedestal is the bias level, or the
+  dark's when it sits below the bias (Origin); the dark level holds dark
+  current, so that gain is a lower bound. It flags a gain in use more than
+  15% off (more than 2× above a lower bound), the way the original Origin's
+  `EGAIN` is 4.6× too high.
+- **Masters**: a master of N frames carries read noise/√N of its own, the
+  same in every sub, so more subs cannot average it away; only dithering,
+  or an alt-az mount's field rotation, moves it onto different sky. It is
+  compared with the stack's own noise.
 
 ```
 Calibration frames against the lights (20 s, gain/ISO 200, 15.6 °C, filter Nebula)
-  Type  Files                          Taken       Exp s   Gain/ISO  Temp °C  Filter  Notes
+  Type  Files                          Taken       Exp s   Gain/ISO  Temp °C  Filter  Issues
   BIAS  5, 1 distinct, 9-frame master  2025-10-17  0.001   200       30.6     -       -
-  DARK  5, 1 distinct, 9-frame master  2025-10-17  30      200       30.4     -       none at 20 s, so scaled by exposure; 14.8 °C warmer; 123 ADU below the bias, so dark − bias (to scale or optimise it) is negative
+  DARK  5, 1 distinct, 9-frame master  2025-10-17  30      200       30.4     -       none at 20 s, so scaled by exposure; 14.8 °C warmer
   FLAT  1, 30-frame master             2025-10-23  0.0589  23        27.1     Clear   none for filter Nebula
+  Bias     banding 1.7 ADU between rows, 1.2 between columns (6% of the 30 ADU pixel noise)
+  Dark     123 ADU below the bias, so dark − bias (to scale or optimise it) is negative; hot pixels 1.50× the lights', 1.00× scaled to 20 s
+  Flat     level 58% of range, no dust shadows
+  Gain     ≥ 0.0164 e⁻/ADU by photon transfer on 3 pairs of neighbouring lights (pedestal from the dark: its dark current counts as noise); the gain in use, 0.0165, is consistent
+  Masters  the 9-frame dark adds ≥ 0.5 e⁻ per pixel, the same in every sub, to the 225-sub stack's 0.71 e⁻: undithered, stack noise ≥ +22%
 ```
 
 Then a session summary per filter, naming the best unflagged frame by wFWHM

@@ -330,7 +330,7 @@ func TestCalibration(t *testing.T) {
 		cal(fits.Flat, 0.0589399, 23, 27, "Clear", 3000),
 	}
 	var b bytes.Buffer
-	Calibration(&b, frames, calib)
+	Calibration(&b, frames, calib, math.NaN(), nil)
 	for _, want := range []string{
 		"BIAS  2, 1 distinct, 9-frame master  2025-10-17  0.001",
 		"none at gain/ISO 200; none at 20 s, so scaled by exposure; 15.4 °C warmer",
@@ -341,7 +341,7 @@ func TestCalibration(t *testing.T) {
 		}
 	}
 	b.Reset()
-	Calibration(&b, frames, nil) // lights only: no section
+	Calibration(&b, frames, nil, math.NaN(), nil) // lights only: no section
 	if b.Len() != 0 {
 		t.Errorf("no calibration frames printed:\n%s", b.String())
 	}
@@ -371,7 +371,7 @@ func TestFocusDrift(t *testing.T) {
 
 func TestPedestal(t *testing.T) {
 	frame := func(typ string, level, noise float64) Calib {
-		return Calib{Image: fits.Image{Level: level, PixNoise: noise, Meta: fits.Meta{Type: typ, Exp: 30, Setting: 200}}}
+		return Calib{Image: fits.Image{Cal: fits.CalStats{Level: level}, PixNoise: noise, Meta: fits.Meta{Type: typ, Exp: 30, Setting: 200}}}
 	}
 	biases := []Calib{frame(fits.Bias, 4990, 30)}
 	if got := pedestal([]Calib{frame(fits.Dark, 4868, 71)}, biases, 0.0165); !strings.HasPrefix(got, "122 ADU below the bias") {
@@ -393,8 +393,10 @@ func TestPedestal(t *testing.T) {
 }
 
 func TestBiasReadNoise(t *testing.T) {
-	light := analyze.Result{Gain: 0.0165,
-		Setting: 200}
+	light := analyze.Result{
+		Gain:    0.0165,
+		Setting: 200,
+	}
 	frames := []Frame{{Result: light}}
 	bias := func(path, date string, stack, noise float64) Calib {
 		return Calib{Path: path, Image: fits.Image{PixNoise: noise, Meta: fits.Meta{Type: fits.Bias, Setting: 200, Date: date, Stack: stack}}}
@@ -425,5 +427,77 @@ func TestBiasReadNoise(t *testing.T) {
 	frames[0].Result.Gain = nan // no gain: unknown
 	if rn, _ := BiasReadNoise(frames, []Calib{bias("a", "d1", 9, 30.4)}, pair); !math.IsNaN(rn) {
 		t.Errorf("no gain: %v", rn)
+	}
+}
+
+func TestFindings(t *testing.T) {
+	var frames []Frame
+	for i := range 100 {
+		r := analyze.Result{Gain: 0.0165, NoiseE: 10, Hot: 3000}
+		r.Exp, r.Setting, r.Filter = 20, 200, "Nebula"
+		frames = append(frames, Frame{Path: strconv.Itoa(i), Result: r})
+	}
+	frames[0].Flags = []string{"fwhm"} // flagged: not in the stack
+	meta := func(typ string, exp float64) fits.Meta {
+		return fits.Meta{Type: typ, Exp: exp, Setting: 200, Date: "2025-10-17T21:32:13", Stack: 9}
+	}
+	calib := []Calib{
+		{Image: fits.Image{PixNoise: 30, Meta: meta(fits.Bias, 0.001), Cal: fits.CalStats{Level: 4990, Rows: 1.8, Cols: 1.2}}},
+		{Image: fits.Image{PixNoise: 70, Meta: meta(fits.Dark, 30), Cal: fits.CalStats{Level: 4868}}, Hot: 4500},
+		{Image: fits.Image{Range: 65535, Meta: meta(fits.Flat, 0.06), Cal: fits.CalStats{Level: 32768, Dust: 2, DustDepth: 0.031}}},
+	}
+	var pedestals []float64
+	pairGain := func(a, b string, pedestal float64) (float64, error) {
+		pedestals = append(pedestals, pedestal)
+
+		return 0.016, nil
+	}
+	var b bytes.Buffer
+	Calibration(&b, frames, calib, 1.5, pairGain)
+	for _, want := range []string{
+		"Bias     banding 1.8 ADU between rows, 1.2 between columns (6% of the 30 ADU pixel noise)",
+		"Dark     122 ADU below the bias, so dark − bias (to scale or optimise it) is negative; hot pixels 1.50× the lights', 1.00× scaled to 20 s",
+		"Flat     level 50% of range, 2 dust shadows, deepest 3.1%",
+		// The dark sits below the bias, so it is the pedestal and the gain a bound.
+		"Gain     ≥ 0.016 e⁻/ADU by photon transfer on 3 pairs of neighbouring lights (pedestal from the dark: its dark current counts as noise); the gain in use, 0.0165, is consistent",
+		// 1.5/√9 = 0.5 e⁻ against 10/√99 = 1.005 e⁻: √(1 + 0.2475) − 1 = 11.7%.
+		"Masters  the 9-frame dark adds ≥ 0.5 e⁻ per pixel, the same in every sub, to the 99-sub stack's 1 e⁻: undithered, stack noise ≥ +12%",
+	} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, b.String())
+		}
+	}
+	if !slices.Equal(pedestals, []float64{4868, 4868, 4868}) {
+		t.Errorf("pedestals %v, want the dark's level three times", pedestals)
+	}
+}
+
+func TestGainCheck(t *testing.T) {
+	frames := make([]Frame, 8)
+	for i := range frames {
+		frames[i].Result.Gain = 0.0742 // the raw Origin178 EGAIN
+	}
+	bias := []Calib{{Image: fits.Image{Cal: fits.CalStats{Level: 5000}}}}
+	measured := func(string, string, float64) (float64, error) { return 0.0162, nil }
+	for _, c := range []struct {
+		darks []Calib
+		want  string
+	}{
+		// Bias pedestal: a plain measurement; 4.6× off.
+		{want: "; the gain in use, 0.0742, is 4.6× that: run with -gain 0.0162"},
+		// Dark pedestal: a lower bound, but 4.6× is beyond what dark current hides.
+		{darks: []Calib{{Image: fits.Image{Cal: fits.CalStats{Level: 4800}}}}, want: "is 4.6× that"},
+		// A dark above the bias leaves the bias as pedestal.
+		{darks: []Calib{{Image: fits.Image{Cal: fits.CalStats{Level: 5100}}}}, want: "neighbouring lights; the gain"},
+	} {
+		if got := gainCheck(frames, bias, c.darks, measured); !strings.Contains(got, c.want) {
+			t.Errorf("darks %v: %q, want %q", c.darks, got, c.want)
+		}
+	}
+	for i := range frames { // the corrected gain agrees
+		frames[i].Result.Gain = 0.0165
+	}
+	if got := gainCheck(frames, bias, nil, measured); !strings.HasSuffix(got, "the gain in use, 0.0165, agrees") {
+		t.Errorf("agreeing gain: %q", got)
 	}
 }

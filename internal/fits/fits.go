@@ -7,6 +7,7 @@ package fits
 
 import (
 	"bufio"
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
@@ -45,9 +46,26 @@ type Image struct {
 	// PixNoise is the noise of one raw pixel in ADU, measured before
 	// binning: see pixNoise.
 	PixNoise float64
-	// Level is the median raw sample of a bias or dark frame, whose pixels
-	// Load does not keep; 0 for lights.
+	// Cal is what Load measures of a calibration frame; zero for lights.
+	Cal CalStats
+}
+
+// CalStats describes a calibration frame's pixels, which Load keeps only
+// for darks (to find their hot pixels the way lights' are found).
+type CalStats struct {
+	// Level is the median raw sample (bias, dark, flat).
 	Level float64
+	// Rows and Cols are a bias frame's banding: the σ of the step between
+	// neighbouring row (column) means in ADU, less what pixel noise alone
+	// gives a mean of that many pixels.
+	Rows, Cols float64
+	// Clipped is the fraction of a flat's pixels at its maximum, when that
+	// maximum is within 2% of the sample range: an overexposed flat.
+	Clipped float64
+	// Dust counts a flat's dust shadows, and DustDepth is the deepest's
+	// fraction below its surroundings: see dust.
+	Dust      int
+	DustDepth float64
 }
 
 // Meta is observing context from the FITS header; NaN/""/zero when absent.
@@ -83,8 +101,9 @@ type Meta struct {
 // planes and 2x2-bins Bayer (CFA) data. Gain comes from EGAIN and plate scale
 // from XPIXSZ/FOCALLEN (or CDELT2); either is left 0 when the header lacks it.
 //
-// Other frame types return ErrNotLight with the header's Meta; bias and dark
-// frames also get PixNoise and Level, for read noise and the dark's pedestal.
+// Other frame types return ErrNotLight with the header's Meta, and bias and
+// flats their PixNoise, Range and Cal without pixels. A dark is loaded in
+// full, as a light would be, plus its Cal.Level.
 func Load(path string) (Image, error) {
 	im, done, err := firstImage(path)
 	if err != nil {
@@ -93,14 +112,15 @@ func Load(path string) (Image, error) {
 	defer done()
 	hdr, axes := im.Header(), im.Header().Axes()
 	w, h := axes[0], axes[1]
-	if t := frameType(filepath.Base(path), hdr); t != Light {
-		img := Image{Meta: meta(hdr, axes, t)}
-		if t == Bias || t == Dark {
+	t := frameType(filepath.Base(path), hdr)
+	if t != Light && t != Dark {
+		img := Image{Meta: meta(hdr, axes, t), Range: math.Exp2(float64(hdr.Bitpix())) - 1}
+		if t == Bias || t == Flat {
 			pix, _, err := samples(im)
 			if err != nil {
 				return Image{}, err
 			}
-			img.PixNoise, img.Level = pixNoise(pix, w, h), float64(rough(pix))
+			img.PixNoise, img.Cal = pixNoise(pix, w, h), calStats(t, pix, w, h, img.Range, img.Meta.CFA)
 		}
 
 		return img, ErrNotLight
@@ -110,6 +130,10 @@ func Load(path string) (Image, error) {
 		return Image{}, err
 	}
 	img := Image{W: w, H: h, Pix: pix, Scale: 1}
+	var level float64 // a dark's, before binning makes a new Image
+	if t == Dark {
+		level = float64(rough(pix))
+	}
 	blankBorder(img.Pix, w, h)
 	// Celestron Origin stores each ADC count as several ADU (25 at ISO
 	// 1000: every pixel a multiple of 25) but writes EGAIN per count.
@@ -153,10 +177,143 @@ func Load(path string) (Image, error) {
 		}
 	}
 
-	img.Meta = meta(hdr, axes, Light)
+	img.Meta = meta(hdr, axes, t)
 	img.Meta.BayerFlip = flip
+	if t == Dark {
+		img.Cal.Level = level
+
+		return img, ErrNotLight
+	}
 
 	return img, nil
+}
+
+// calStats measures a bias or flat frame's pixels (see CalStats).
+func calStats(t string, pix []float32, w, h int, rng float64, cfa bool) CalStats {
+	c := CalStats{Level: float64(rough(pix))}
+	switch t {
+	case Bias:
+		c.Rows, c.Cols = banding(pix, w, h)
+	case Flat:
+		if top := maxOf(pix); float64(top) >= 0.98*rng {
+			n := 0
+			for _, v := range pix {
+				if v == top {
+					n++
+				}
+			}
+			c.Clipped = float64(n) / float64(len(pix))
+		}
+		img := Image{W: w, H: h, Pix: pix, Scale: 1}
+		if cfa {
+			img = Bin2(img) // superpixels, so the Bayer grid is no texture
+		}
+		c.Dust, c.DustDepth = dust(img.Pix, img.W, img.H)
+	}
+
+	return c
+}
+
+// banding is the σ of the step between neighbouring row means and between
+// neighbouring column means, robust (16th–84th percentile) and over √2 as
+// in pixNoise, with the part pixel noise alone gives a mean of w (h)
+// pixels removed in quadrature.
+func banding(pix []float32, w, h int) (float64, float64) {
+	rows, cols := make([]float64, h), make([]float64, w)
+	for y := range h {
+		for x, v := range pix[y*w : (y+1)*w] {
+			rows[y] += float64(v)
+			cols[x] += float64(v)
+		}
+	}
+	noise := pixNoise(pix, w, h)
+	steps := func(means []float64, n int) float64 {
+		d := make([]float64, 0, len(means))
+		for i := 1; i < len(means); i++ {
+			d = append(d, (means[i]-means[i-1])/float64(n))
+		}
+		slices.Sort(d)
+		k := len(d) - 1
+		sd := (d[k*841/1000] - d[k*159/1000]) / 2 / math.Sqrt2
+
+		return math.Sqrt(max(sd*sd-noise*noise/float64(n), 0))
+	}
+
+	return steps(rows, w), steps(cols, h)
+}
+
+// Dust shadows: a flat's 16-pixel blocks whose median sits over dustDip
+// below the median of the 7×7 blocks around them, counted as connected
+// groups. Vignetting changes far more slowly than that, and the 3-block
+// margin keeps the frame edge out. ponytail: dust rings far wider than 3
+// blocks (48 px) lower their whole neighbourhood and are missed.
+const (
+	dustBlock = 16
+	dustDip   = 0.01
+)
+
+// dust returns the number of dust shadows in a flat and the deepest one's
+// depth below its surroundings (0 when none).
+func dust(pix []float32, w, h int) (int, float64) {
+	nx, ny := w/dustBlock, h/dustBlock
+	if nx < 7 || ny < 7 {
+		return 0, 0
+	}
+	bm := make([]float64, nx*ny)
+	v := make([]float32, 0, dustBlock*dustBlock)
+	for by := range ny {
+		for bx := range nx {
+			v = v[:0]
+			for y := by * dustBlock; y < (by+1)*dustBlock; y++ {
+				v = append(v, pix[y*w+bx*dustBlock:y*w+(bx+1)*dustBlock]...)
+			}
+			v = slices.DeleteFunc(v, func(x float32) bool { return x != x })
+			slices.Sort(v)
+			if len(v) > 0 {
+				bm[by*nx+bx] = float64(v[len(v)/2])
+			}
+		}
+	}
+	dip := make([]float64, nx*ny) // 0 = no dip
+	around := make([]float64, 0, 49)
+	for by := 3; by < ny-3; by++ {
+		for bx := 3; bx < nx-3; bx++ {
+			around = around[:0]
+			for yy := by - 3; yy <= by+3; yy++ {
+				around = append(around, bm[yy*nx+bx-3:yy*nx+bx+4]...)
+			}
+			slices.Sort(around)
+			if m := around[len(around)/2]; m > 0 {
+				if d := 1 - bm[by*nx+bx]/m; d > dustDip {
+					dip[by*nx+bx] = d
+				}
+			}
+		}
+	}
+	n, deepest := 0, 0.0
+	for i := range dip {
+		if dip[i] == 0 {
+			continue
+		}
+		n++
+		stack := []int{i} // flood the group so it counts once
+		for len(stack) > 0 {
+			j := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if dip[j] == 0 {
+				continue
+			}
+			deepest = max(deepest, dip[j])
+			dip[j] = 0
+			for _, k := range []int{j - 1, j + 1, j - nx, j + nx} { // the margin stops row wrap
+				if k >= 0 && k < len(dip) && dip[k] > 0 {
+					stack = append(stack, k)
+				}
+			}
+		}
+	}
+
+	return n, deepest
 }
 
 // firstImage opens the first 2D/3D image HDU of path; done closes the file.
@@ -208,27 +365,38 @@ func samples(im fitsio.Image) ([]float32, int, error) {
 	return pix, planes, err
 }
 
-// PairNoise is the read noise in ADU from two bias frames: the robust σ of
-// their difference over √2. Differencing cancels the fixed pattern that a
-// single frame's pixel-to-pixel noise still holds. Every 16th row and 3rd
-// pixel keep it cheap, as in pixNoise.
-func PairNoise(a, b string) (float64, error) {
+// pair reads two frames' samples, which must be the same size, and the
+// row width.
+func pair(a, b string) ([2][]float32, int, error) {
 	var pix [2][]float32
 	var w int
 	for i, p := range []string{a, b} {
 		im, done, err := firstImage(p)
 		if err != nil {
-			return math.NaN(), err
+			return pix, 0, err
 		}
 		pix[i], _, err = samples(im)
 		w = im.Header().Axes()[0]
 		done()
 		if err != nil {
-			return math.NaN(), err
+			return pix, 0, err
 		}
 	}
 	if len(pix[0]) != len(pix[1]) {
-		return math.NaN(), fmt.Errorf("%w: %s, %s", ErrSize, a, b)
+		return pix, 0, fmt.Errorf("%w: %s, %s", ErrSize, a, b)
+	}
+
+	return pix, w, nil
+}
+
+// PairNoise is the read noise in ADU from two bias frames: the robust σ of
+// their difference over √2. Differencing cancels the fixed pattern that a
+// single frame's pixel-to-pixel noise still holds. Every 16th row and 3rd
+// pixel keep it cheap, as in pixNoise.
+func PairNoise(a, b string) (float64, error) {
+	pix, w, err := pair(a, b)
+	if err != nil {
+		return math.NaN(), err
 	}
 	var d []float64
 	for y := 0; y < len(pix[0])/w; y += 16 {
@@ -241,10 +409,64 @@ func PairNoise(a, b string) (float64, error) {
 	if len(d) < 100 {
 		return math.NaN(), nil
 	}
+
+	return spread(d) / math.Sqrt2, nil
+}
+
+// PairGain is the gain in e⁻/ADU by two-point photon transfer on two
+// consecutive raw light frames (Janesick, Photon Transfer; originstack
+// camera_profile.raw_pair_gain): their difference cancels everything
+// static (sky structure, vignetting, the sensor's fixed pattern), so half
+// its variance is one frame's temporal noise, and gain = (signal −
+// pedestal) / variance. Pixels are binned by signal from the 5th to the
+// 60th percentile, the sky end where stars are rare, and the bins' median
+// gain returned. Read noise stays in the variance, so it reads low by
+// RN²/σ²: under 3% on skies thousands of ADU above the pedestal.
+func PairGain(a, b string, pedestal float64) (float64, error) {
+	pix, _, err := pair(a, b)
+	if err != nil {
+		return math.NaN(), err
+	}
+	type sample struct{ s, d float64 }
+	var v []sample
+	for i := 0; i < len(pix[0]); i += 7 {
+		p, q := float64(pix[0][i]), float64(pix[1][i])
+		if !math.IsNaN(p) && !math.IsNaN(q) {
+			v = append(v, sample{s: (p + q) / 2, d: p - q})
+		}
+	}
+	slices.SortFunc(v, func(x, y sample) int { return cmp.Compare(x.s, y.s) })
+	var gains []float64
+	for pct := 5; pct < 60; pct += 5 {
+		bin := v[len(v)*pct/100 : len(v)*(pct+5)/100]
+		if len(bin) < 1000 {
+			continue
+		}
+		d := make([]float64, len(bin))
+		for i, x := range bin {
+			d[i] = x.d
+		}
+		sd := spread(d)
+		if sig := bin[len(bin)/2].s - pedestal; sig > 0 && sd > 0 {
+			gains = append(gains, sig/(sd*sd/2))
+		}
+	}
+
+	if len(gains) == 0 {
+		return math.NaN(), nil
+	}
+	slices.Sort(gains)
+
+	return gains[len(gains)/2], nil
+}
+
+// spread is the robust σ of d (half the 16th–84th percentile span); it
+// sorts d.
+func spread(d []float64) float64 {
 	slices.Sort(d)
 	n := len(d) - 1
 
-	return (d[n*841/1000] - d[n*159/1000]) / 2 / math.Sqrt2, nil
+	return (d[n*841/1000] - d[n*159/1000]) / 2
 }
 
 // Frame types from frameType.

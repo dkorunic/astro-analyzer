@@ -126,7 +126,16 @@ by the default run.
   `ErrNotLight`, plus `PixNoise` and `Level` for bias and darks (pixels are
   not kept); `report.Calibration` compares them with the lights'. Origin
   darks sit 120–410 ADU *below* their bias: no dark current is measurable.
-  Bias read noise uses the lights' `Result.Gain` (bias headers lack EGAIN). `Stack` (master lights, `NCOMBINE` > 1) is skipped, not listed.
+  Bias read noise uses the lights' `Result.Gain` (bias headers lack EGAIN).
+  Darks are loaded in full and run through `analyze.Frame` (`calibFrame`)
+  so their `Hot` compares with the lights'; set `Cal` after `Bin2`, which
+  returns a fresh `Image`.
+- Photon-transfer gain (`fits.PairGain`) needs the lights' pedestal. On
+  Origin the bias pedestal is wrong (darks sit below it), so the dark level
+  is used: that gain is a lower bound (dark current counts as noise). Mark
+  II: 0.0091–0.0101 on cool sessions, 0.0076 at 32 °C, against EGAIN/25 =
+  0.0112; Origin178: 0.0161–0.0164 against 0.0165. The bias pedestal read
+  0.0055–0.0076 on nebula fields: always check the pedestal first. `Stack` (master lights, `NCOMBINE` > 1) is skipped, not listed.
   PixInsight writes `IMAGETYP = 'Master Light'`: matching on "LIGHT" alone
   measured a WBPP master as a sub.
 - Per-pixel noise in electrons comes from raw same-colour neighbours

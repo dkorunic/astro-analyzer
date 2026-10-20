@@ -444,10 +444,70 @@ func TestPairNoise(t *testing.T) {
 		}
 	}
 	img, err := fits.Load(paths[0])
-	if !errors.Is(err, fits.ErrNotLight) || !(math.Abs(img.Level-1000) < 2) || !(img.PixNoise > 20) {
-		t.Errorf("bias: level %v, pixel noise %v (pattern included), error %v", img.Level, img.PixNoise, err)
+	if !errors.Is(err, fits.ErrNotLight) || !(math.Abs(img.Cal.Level-1000) < 2) || !(img.PixNoise > 20) {
+		t.Errorf("bias: level %v, pixel noise %v (pattern included), error %v", img.Cal.Level, img.PixNoise, err)
 	}
 	if rn, err := fits.PairNoise(paths[0], paths[1]); err != nil || !(math.Abs(rn-10) < 0.5) {
 		t.Errorf("PairNoise = %v, %v; want 10", rn, err)
+	}
+}
+
+// TestPairGain checks photon transfer on two frames of a sky that rises
+// across the field, at a known gain: Gaussian shot noise of variance
+// signal/gain ADU² above a 1000 ADU pedestal.
+func TestPairGain(t *testing.T) {
+	const gain, pedestal = 0.5, 1000.0
+	rng := rand.New(rand.NewPCG(3, 4))
+	var paths [2]string
+	for k := range paths {
+		pix := make([]float64, synth.W*synth.H)
+		for i := range pix {
+			s := 2000 + 4000*float64(i%synth.W)/synth.W
+			pix[i] = pedestal + s + math.Sqrt(s/gain)*rng.NormFloat64()
+		}
+		paths[k] = filepath.Join(t.TempDir(), "Light.fits")
+		if err := synth.WriteFITS(paths[k], pix); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if g, err := fits.PairGain(paths[0], paths[1], pedestal); err != nil || !(math.Abs(g/gain-1) < 0.05) {
+		t.Errorf("PairGain = %v, %v; want %v", g, err, gain)
+	}
+}
+
+// TestCalStats checks bias banding, and a flat's clipping and dust shadow.
+func TestCalStats(t *testing.T) {
+	rng := rand.New(rand.NewPCG(5, 6))
+	pix := make([]float64, synth.W*synth.H)
+	for y := range synth.H {
+		row := 3 * rng.NormFloat64() // banding: one offset per row
+		for x := range synth.W {
+			pix[y*synth.W+x] = 1000 + row + 10*rng.NormFloat64()
+		}
+	}
+	path := filepath.Join(t.TempDir(), "b.fits")
+	if err := synth.WriteFITS(path, pix, fitsio.Card{Name: "IMAGETYP", Value: "BIAS"}); err != nil {
+		t.Fatal(err)
+	}
+	img, _ := fits.Load(path)
+	if c := img.Cal; !(math.Abs(c.Rows-3) < 0.5) || !(c.Cols < 0.5) {
+		t.Errorf("banding rows %v, columns %v; want 3, 0", c.Rows, c.Cols)
+	}
+
+	for i := range pix {
+		x, y := i%synth.W, i/synth.W
+		pix[i] = 30000 * (1 - 0.1*float64(x)/synth.W) // vignetting: no dust
+		if dx, dy := x-300, y-200; dx*dx+dy*dy < 20*20 {
+			pix[i] *= 0.97 // a 3% dust shadow
+		}
+	}
+	pix[0], pix[1], pix[2], pix[3], pix[4] = 65535, 65535, 65535, 65535, 65535
+	path = filepath.Join(t.TempDir(), "f.fits")
+	if err := synth.WriteFITS(path, pix, fitsio.Card{Name: "IMAGETYP", Value: "FLAT"}); err != nil {
+		t.Fatal(err)
+	}
+	img, _ = fits.Load(path)
+	if c := img.Cal; c.Dust != 1 || !(math.Abs(c.DustDepth-0.03) < 0.005) || !(math.Abs(c.Clipped-5.0/float64(len(pix))) < 1e-9) {
+		t.Errorf("flat: %d dust shadows, deepest %v, clipped %v; want 1, 0.03, 5 pixels", c.Dust, c.DustDepth, c.Clipped)
 	}
 }

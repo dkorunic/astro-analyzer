@@ -95,7 +95,7 @@ func main() {
 
 	res := make([]analyze.Result, len(files))
 	errs := make([]error, len(files))
-	calibImg := make([]fits.Image, len(files))
+	cals := make([]report.Calib, len(files))
 	sem := make(chan struct{}, runtime.NumCPU())
 	start := time.Now()
 	if tty {
@@ -108,9 +108,13 @@ func main() {
 			defer func() { <-sem }()
 			defer done.Add(1)
 			img, err := fits.Load(f)
+			if errors.Is(err, fits.ErrNotLight) {
+				errs[i], cals[i] = err, calibFrame(f, img, *sigma, *model)
+
+				return
+			}
 			if err != nil {
 				errs[i] = err
-				calibImg[i] = img // a calibration frame: header, bias/dark noise and level
 
 				return
 			}
@@ -128,34 +132,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "✓ measured %d frames in %.1f s\n", measured.Load(), time.Since(start).Seconds())
 	}
 
-	exit := 0
-	skipped := map[string]int{}
-	var frames []report.Frame
-	var calib []report.Calib
-	for i, f := range files {
-		if errors.Is(errs[i], fits.ErrNotLight) {
-			skipped[calibImg[i].Meta.Type]++
-			if calibImg[i].Meta.Type != fits.Stack {
-				calib = append(calib, report.Calib{Path: f, Image: calibImg[i]})
-			}
-
-			continue
-		}
-		if errs[i] != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v\n", f, errs[i])
-			exit = 1
-
-			continue
-		}
-		frames = append(frames, report.Frame{Path: f, Result: res[i]})
-	}
-	if len(skipped) > 0 {
-		var parts []string
-		for _, t := range slices.Sorted(maps.Keys(skipped)) {
-			parts = append(parts, fmt.Sprintf("%d %s", skipped[t], t))
-		}
-		fmt.Fprintf(os.Stderr, "skipped frames that are not light subs: %s\n", strings.Join(parts, ", "))
-	}
+	frames, calib, exit := collect(files, errs, res, cals)
 	// Chronological order makes the trend lines meaningful; ISO dates sort as strings.
 	if !slices.ContainsFunc(frames, func(f report.Frame) bool { return f.Result.Date == "" }) {
 		slices.SortStableFunc(frames, func(a, b report.Frame) int { return cmp.Compare(a.Result.Date, b.Result.Date) })
@@ -178,13 +155,13 @@ func main() {
 	default:
 		report.Table(os.Stdout, frames)
 		report.Overview(os.Stdout, frames)
-		report.Calibration(os.Stdout, frames, calib)
+		rn, src := readNoiseFor(*readNoise, frames, calib)
+		report.Calibration(os.Stdout, frames, calib, rn, fits.PairGain)
 		report.Summary(os.Stdout, frames)
 		report.Field(os.Stdout, frames)
 		report.Coverage(os.Stdout, frames)
 		report.Drizzle(os.Stdout, frames)
 		report.WBPP(os.Stdout, frames)
-		rn, src := readNoiseFor(*readNoise, frames, calib)
 		report.SubLength(os.Stdout, frames, rn, src)
 	}
 	if err != nil {
@@ -192,6 +169,56 @@ func main() {
 		exit = 1
 	}
 	os.Exit(exit)
+}
+
+// collect sorts the per-file results into light frames and calibration
+// frames (stacks are dropped), printing load errors and a count of the
+// skipped frames by type to stderr. exit is 1 when a file failed to load.
+func collect(files []string, errs []error, res []analyze.Result, cals []report.Calib) ([]report.Frame, []report.Calib, int) {
+	exit := 0
+	skipped := map[string]int{}
+	var frames []report.Frame
+	var calib []report.Calib
+	for i, f := range files {
+		if errors.Is(errs[i], fits.ErrNotLight) {
+			skipped[cals[i].Image.Meta.Type]++
+			if cals[i].Image.Meta.Type != fits.Stack {
+				calib = append(calib, cals[i])
+			}
+
+			continue
+		}
+		if errs[i] != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", f, errs[i])
+			exit = 1
+
+			continue
+		}
+		frames = append(frames, report.Frame{Path: f, Result: res[i]})
+	}
+	if len(skipped) > 0 {
+		parts := make([]string, 0, len(skipped))
+		for _, t := range slices.Sorted(maps.Keys(skipped)) {
+			parts = append(parts, fmt.Sprintf("%d %s", skipped[t], t))
+		}
+		fmt.Fprintf(os.Stderr, "skipped frames that are not light subs: %s\n", strings.Join(parts, ", "))
+	}
+
+	return frames, calib, exit
+}
+
+// calibFrame keeps what the report needs of a calibration frame. A dark
+// goes through the light analysis, so its hot pixels are measured exactly
+// as the lights' are; then the pixels are dropped.
+func calibFrame(path string, img fits.Image, sigma float64, model string) report.Calib {
+	c := report.Calib{Path: path}
+	if img.Meta.Type == fits.Dark && img.Pix != nil {
+		c.Hot = analyze.Frame(img, sigma, model).Hot
+	}
+	img.Pix, img.Sat, img.Colour = nil, nil, [3][]float32{}
+	c.Image = img
+
+	return c
 }
 
 // readNoiseFor picks the read noise for the sub-length comparison: the
