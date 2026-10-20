@@ -329,13 +329,15 @@ func TestCalibration(t *testing.T) {
 		cal(fits.Bias, 0.001, 200, 30, "", 3056), cal(fits.Bias, 0.001, 200, 30, "", 3056),
 		cal(fits.Dark, 30, 500, 30.4, "", 3056),
 		cal(fits.Flat, 0.0589399, 23, 27, "Clear", 3000),
+		cal(fits.DarkFlat, 0.1, 50, 34, "", 3000), // matches the flats' size, not their gain or exposure
 	}
 	var b bytes.Buffer
 	Calibration(&b, frames, calib, math.NaN(), nil)
 	for _, want := range []string{
-		"BIAS  2, 1 distinct, 9-frame master  2025-10-17  0.001",
+		"2, 1 distinct, 9-frame master  2025-10-17  0.001",
 		"none at gain/ISO 200; none at 20 s, so scaled by exposure; 15.4 °C warmer",
 		"0.0589", "size 3000 × 2048; none for filter Nebula",
+		"size 3000 × 2048; none at the flats' gain/ISO 23; none at the flats' 0.0589 s; 7.0 °C warmer than the flats",
 	} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, b.String())
@@ -352,7 +354,7 @@ func TestFocusDrift(t *testing.T) {
 	var frames []Frame
 	for i := range 12 {
 		r := analyze.Result{FWHM: 3 + 0.1*float64(i)}
-		r.Temp, r.Alt = 20-0.5*float64(i), 60 // cooling 0.5 °C per frame
+		r.Temp, r.Alt, r.FocusTemp = 20-0.5*float64(i), 60, math.NaN() // cooling 0.5 °C per frame
 
 		frames = append(frames, Frame{Result: r})
 	}
@@ -500,5 +502,33 @@ func TestGainCheck(t *testing.T) {
 	}
 	if got := gainCheck(frames, bias, nil, measured); !strings.HasSuffix(got, "the gain in use, 0.0165, agrees") {
 		t.Errorf("agreeing gain: %q", got)
+	}
+}
+
+// TestRefocus checks FWHM growth between focuser moves: three runs of 8
+// frames, each growing from 3.0 to 3.3 px: the last three frames' median
+// 3.257 against the first three's 3.043 is +7%. Also focuser temperature
+// taking over from the sensor's in focusDrift.
+func TestRefocus(t *testing.T) {
+	var frames []Frame
+	for i := range 24 {
+		r := analyze.Result{FWHM: 3 + 0.3*float64(i%8)/7}
+		r.Focus, r.Temp, r.FocusTemp = float64(1000+10*(i/8)), 20, math.NaN()
+		frames = append(frames, Frame{Result: r})
+	}
+	if s := refocus(frames); !strings.Contains(s, "moved 2 times; FWHM grows +7%") || !strings.Contains(s, "median of 3 runs") {
+		t.Errorf("refocus: %q", s)
+	}
+	for i := range frames {
+		frames[i].Result.Focus = math.NaN()
+	}
+	if s := refocus(frames); s != "" {
+		t.Errorf("no focuser: %q", s)
+	}
+	for i := range frames { // the tube cools as FWHM grows; the sensor stays at 20 °C
+		frames[i].Result.FWHM, frames[i].Result.FocusTemp = 3+0.05*float64(i), 15-0.2*float64(i)
+	}
+	if s := focusDrift(frames); !strings.Contains(s, "focuser temperature (rank correlation -1.00") {
+		t.Errorf("focusDrift with FOCTEMP: %q", s)
 	}
 }

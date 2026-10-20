@@ -70,6 +70,7 @@ var metrics = []metric{
 	{name: "Sky B", key: "sky_b", prec: 1, bad: 0, get: func(f Frame) float64 { return f.Result.Sky[2] }},
 	{name: "Sky mag", key: "sky_mag", prec: 2, bad: 0, get: func(f Frame) float64 { return f.SkyMag }}, // same signal as Background
 	{name: "Hot", key: "hot_pixel_level", prec: 1, bad: 0, get: func(f Frame) float64 { return f.Result.Hot }},
+	{name: "Trails", key: "trails", prec: 0, bad: +1, get: func(f Frame) float64 { return f.Result.Trails }},
 }
 
 // byFilter splits frames by filter, in order of first appearance. Filters
@@ -319,8 +320,10 @@ func summary(w io.Writer, frames []Frame, label string) {
 		fmt.Fprintf(w, "Reference frame for registration: %s (best wFWHM %.2f px, %d stars)\n",
 			filepath.Base(best.Path), best.WFWHM, best.Result.Stars)
 	}
-	if line := focusDrift(frames); line != "" {
-		fmt.Fprintln(w, line)
+	for _, line := range []string{focusDrift(frames), refocus(frames)} {
+		if line != "" {
+			fmt.Fprintln(w, line)
+		}
 	}
 	fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -338,18 +341,24 @@ func summary(w io.Writer, frames []Frame, label string) {
 	tw.Flush()
 }
 
-// focusDrift notes when FWHM follows sensor temperature: the optics shrink
-// as they cool and focus moves (originstack session_report.py:204 reports
-// |r| > 0.5). Temperature falls through the night as altitude changes, so
-// FWHM is first divided by airmass^0.6, the seeing's dependence on it
-// (Roddier 1981); without an altitude it is used as measured.
+// focusDrift notes when FWHM follows temperature: the optics shrink as
+// they cool and focus moves (originstack session_report.py:204 reports
+// |r| > 0.5). The focuser's temperature (FOCTEMP) is the tube's, so it is
+// taken over the sensor's when the frames have it. Temperature falls
+// through the night as altitude changes, so FWHM is first divided by
+// airmass^0.6, the seeing's dependence on it (Roddier 1981); without an
+// altitude it is used as measured.
 //
 // ponytail: under 8 frames or a 1 °C span the correlation means nothing.
 func focusDrift(frames []Frame) string {
 	fwhm, temp := make([]float64, len(frames)), make([]float64, len(frames))
+	focuser := slices.ContainsFunc(frames, func(f Frame) bool { return !math.IsNaN(f.Result.FocusTemp) })
 	lo, hi := math.Inf(1), math.Inf(-1)
 	for i, f := range frames {
 		fwhm[i], temp[i] = f.Result.FWHM, f.Result.Temp
+		if focuser {
+			temp[i] = f.Result.FocusTemp
+		}
 		if a := f.Result.Alt; a > 0 { // false for NaN
 			fwhm[i] /= math.Pow(1/math.Sin(a*math.Pi/180), 0.6)
 		}
@@ -362,7 +371,61 @@ func focusDrift(frames []Frame) string {
 		return ""
 	}
 
-	return fmt.Sprintf("FWHM follows sensor temperature (rank correlation %+.2f over %.1f °C, airmass removed): likely focus drift, refocus as it cools", r, hi-lo)
+	src := "sensor"
+	if focuser {
+		src = "focuser"
+	}
+
+	return fmt.Sprintf("FWHM follows %s temperature (rank correlation %+.2f over %.1f °C, airmass removed): likely focus drift, refocus as it cools", src, r, hi-lo)
+}
+
+// refocusRun is the fewest frames at one focuser position whose first and
+// last refocusEnds frames are compared.
+const (
+	refocusRun  = 6
+	refocusEnds = 3
+)
+
+// refocus reports how FWHM grows between focuser moves (FOCUSPOS): the
+// median, over runs of frames at one position, of the last frames' median
+// FWHM against the first's. Growth means focus drifts faster than the
+// autofocus runs; "" without moves or long enough runs.
+//
+// ponytail: seeing and altitude changes within a run count as drift.
+func refocus(frames []Frame) string {
+	var growth []float64
+	moves := 0
+	for i := 0; i < len(frames); {
+		j := i + 1
+		for j < len(frames) && frames[j].Result.Focus == frames[i].Result.Focus {
+			j++
+		}
+		if math.IsNaN(frames[i].Result.Focus) {
+			i = j
+
+			continue
+		}
+		if i > 0 && !math.IsNaN(frames[i-1].Result.Focus) {
+			moves++
+		}
+		if run := frames[i:j]; len(run) >= refocusRun {
+			first, last := make([]float64, refocusEnds), make([]float64, refocusEnds)
+			for k := range refocusEnds {
+				first[k], last[k] = run[k].Result.FWHM, run[len(run)-refocusEnds+k].Result.FWHM
+			}
+			g := stats.MedianOf(slices.DeleteFunc(last, math.IsNaN))/stats.MedianOf(slices.DeleteFunc(first, math.IsNaN)) - 1
+			if !math.IsNaN(g) {
+				growth = append(growth, g)
+			}
+		}
+		i = j
+	}
+	if moves == 0 || len(growth) == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("Focuser moved %d times; FWHM grows %+.0f%% from the start to the end of a position (median of %d runs)",
+		moves, 100*stats.MedianOf(growth), len(growth))
 }
 
 // CSV writes one row per frame at full precision; unknown values are empty.

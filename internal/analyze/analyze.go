@@ -45,6 +45,8 @@ type Result struct {
 	// pixels: it follows dark current, so sensor temperature. Compare it
 	// between frames, not cameras. See hotLevel.
 	Hot float64
+	// Trails counts satellite, aircraft and meteor trails: see trails.
+	Trails float64
 	// Sky is the sigma-clipped sky level in raw R, G and B pixels of a
 	// colour (CFA) frame, NaN otherwise. Moonlight is blue, sodium light
 	// pollution orange, so the colour of a background change names it.
@@ -112,6 +114,7 @@ func Frame(img fits.Image, sigma float64, model string) Result {
 	}
 	r.SunAlt, r.MoonAlt, r.MoonIllum, r.MoonSep = ephemeris(img.Meta)
 	r.Sky = skyColour(img.Colour)
+	r.Trails = float64(trails(img.Pix, img.W, img.H, noise))
 
 	w, h := img.W, img.H
 	k := float32(sigma * noise)

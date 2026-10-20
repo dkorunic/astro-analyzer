@@ -80,13 +80,21 @@ type Meta struct {
 	// see cfaSamples.
 	Bayer string
 	// Type is the frame type (Light, Bias, Dark...): see frameType.
-	Type               string
-	WCS                WCS    // plate solution, for drizzle dither analysis
-	Size               [2]int // sensor pixels, before Bayer binning
-	Exp, Temp, Alt     float64
-	Setting            float64 // camera gain setting: GAIN, else ISOSPEED; NaN if absent
-	Plate              float64 // arcsec per original pixel, 0 if unknown
-	Pixel              float64 // XPIXSZ, µm, binning included; 0 if unknown
+	Type           string
+	WCS            WCS    // plate solution, for drizzle dither analysis
+	Size           [2]int // sensor pixels, before Bayer binning
+	Exp, Temp, Alt float64
+	Setting        float64 // camera gain setting: GAIN, else ISOSPEED; NaN if absent
+	Plate          float64 // arcsec per original pixel, 0 if unknown
+	Pixel          float64 // XPIXSZ, µm, binning included; 0 if unknown
+	// Focus is the focuser position (FOCUSPOS, FOCPOS) and FocusTemp its
+	// temperature (FOCTEMP, FOCUSTEM), as N.I.N.A. and ASTAP read them; NaN
+	// if absent.
+	Focus, FocusTemp float64
+	// SQM is a sky brightness the capture software wrote, mag/arcsec²
+	// (SQM: ASTAP's photometric, zenith-corrected, or N.I.N.A.'s from a
+	// meter; MPSAS); NaN if absent.
+	SQM                float64
 	Aperture, FocalLen float64 // mm
 	Lat, Lon           float64 // site, degrees, east positive
 	RA, Dec            float64 // target (frame centre), degrees
@@ -547,6 +555,9 @@ func meta(hdr *fitsio.Header, axes []int, typ string) Meta {
 		Exp:       first(hdr, "EXPTIME", "EXPOSURE"),
 		Setting:   first(hdr, "GAIN", "ISOSPEED"),
 		Temp:      first(hdr, "CCD-TEMP"),
+		Focus:     first(hdr, "FOCUSPOS", "FOCPOS"),
+		FocusTemp: first(hdr, "FOCTEMP", "FOCUSTEM"),
+		SQM:       first(hdr, "SQM", "MPSAS"),
 		// Not ALTITUDE: that is the observing site's elevation in metres.
 		Alt:      first(hdr, "CENTALT", "OBJCTALT"),
 		Aperture: first(hdr, "APTDIA", "APERTURE"),

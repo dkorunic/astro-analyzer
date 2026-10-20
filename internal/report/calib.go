@@ -103,11 +103,12 @@ func Calibration(w io.Writer, frames []Frame, calib []Calib, rn float64, pairGai
 	for _, c := range calib {
 		byType[c.Image.Meta.Type] = append(byType[c.Image.Meta.Type], c)
 	}
+	flat := summarise(metas(byType[fits.Flat]))
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "  Type\tFiles\tTaken\tExp s\tGain/ISO\tTemp °C\tFilter\tIssues")
 	for _, t := range slices.Sorted(maps.Keys(byType)) {
 		c := summarise(metas(byType[t]))
-		notes := issues(t, c, light)
+		notes := issues(t, c, light, flat)
 		files := strconv.Itoa(len(byType[t]))
 		if len(c.dates) < len(byType[t]) {
 			files += fmt.Sprintf(", %d distinct", len(c.dates))
@@ -179,8 +180,10 @@ func findings(frames []Frame, byType map[string][]Calib, rn float64, pairGain fu
 // issues lists how calibration frames of type t fail to match the lights.
 // Gain or ISO matters for bias and darks (offset and dark current change
 // with it), exposure and temperature for darks, the filter for flats (its
-// dust and vignetting are what they correct), size for all.
-func issues(t string, c, light headers) []string {
+// dust and vignetting are what they correct), size for all. Dark flats
+// calibrate the flats, so they are held to the flats' gain, exposure and
+// temperature instead (ASTAP's FD_ issues, unit_stack.pas:12726).
+func issues(t string, c, light, flat headers) []string {
 	var out []string
 	for _, s := range c.sizes {
 		if !slices.Contains(light.sizes, s) {
@@ -194,13 +197,22 @@ func issues(t string, c, light headers) []string {
 			}
 		}
 	}
-	if t == fits.Bias || t == fits.Dark {
-		missing(c.settings, light.settings, "none at gain/ISO %g")
+	ref, whose, than := light, "", ""
+	if t == fits.DarkFlat {
+		ref, whose, than = flat, "the flats' ", " than the flats"
 	}
-	if t == fits.Dark {
+	if t == fits.Bias || t == fits.Dark || t == fits.DarkFlat {
+		missing(c.settings, ref.settings, "none at "+whose+"gain/ISO %g")
+	}
+	switch t {
+	case fits.Dark:
 		missing(c.exps, light.exps, "none at %g s, so scaled by exposure")
-		if d := c.temp - light.temp; math.Abs(d) >= warmerDark { // false for NaN
-			out = append(out, fmt.Sprintf("%.1f °C %s", math.Abs(d), map[bool]string{true: "warmer", false: "colder"}[d > 0]))
+	case fits.DarkFlat:
+		missing(c.exps, flat.exps, "none at "+whose+"%.3g s")
+	}
+	if t == fits.Dark || t == fits.DarkFlat {
+		if d := c.temp - ref.temp; math.Abs(d) >= warmerDark { // false for NaN
+			out = append(out, fmt.Sprintf("%.1f °C %s%s", math.Abs(d), map[bool]string{true: "warmer", false: "colder"}[d > 0], than))
 		}
 	}
 	if t == fits.Flat && len(c.filters) > 0 {

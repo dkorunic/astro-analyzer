@@ -103,9 +103,9 @@ astro-analyzer -reject ~/astro/M27 | xargs -I{} mv {} ~/astro/M27/rejected/
 One row per frame, sorted by `DATE-OBS`:
 
 ```
-File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Sky mag  Hot     Flags
-Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  19.72    7436.3
-Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  19.72    7427.5  Resid
+File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Sky mag  Hot     Trails  Flags
+Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  19.72    7436.3  0       
+Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  19.72    7427.5  0       Resid
 ```
 
 Then the equipment and integration time per filter, with one row per
@@ -125,16 +125,22 @@ explicitly in WBPP or Debayer.
 ```
 Bubble Nebula · RASA6F2 152 mm f/2.2 · Origin678C-643c1983c23be8af7 (IMX678) · CFA GBRG · 1.23"/px, field 79′ × 45′
 
-Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 29 min unflagged, over 2 nights
+Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 27 min unflagged, over 2 nights
   Night       Frames  Time         FWHM px  Background  Sky mag  Bortle  Gradient  Moon lit  Moon up  Moon dist  Twilight
   2026-10-13  658     20:06–00:06  5.43     6165.6      20.08    6       74.9 ←    10%       0%       124°       0
   2026-10-16  682     20:11–00:20  4.76     6262.5      20.04    6       80.1 ←    33%       24%      108°       0
 ```
 
+When the frames carry a sky brightness from the capture software (`SQM`,
+which ASTAP measures photometrically and N.I.N.A. reads from a meter, or
+`MPSAS`), an `SQM header` column after Bortle shows its median, to check
+Sky mag against.
+
 When the directories hold calibration frames, their headers are checked
 against the lights': gain or ISO for bias and darks, dark exposure and a
 sensor temperature 5 °C or more away, the flat's filter, and any frame
-size the lights lack.
+size the lights lack. Dark flats are held to the flats' gain, exposure and
+temperature instead (as ASTAP checks them).
 Files sharing one `DATE-OBS` are copies of one capture, as the Origin saves
 its masters. Then what their pixels show:
 
@@ -179,10 +185,15 @@ Then a session summary per filter, naming the best unflagged frame by wFWHM
 as the registration reference (as Siril picks one), with a trend line per
 metric in time order. When FWHM follows sensor temperature (rank correlation
 beyond ±0.5 over at least 1 °C and 8 frames, after dividing out the seeing's
-airmass^0.6), a line suggests focus drift:
+airmass^0.6), a line suggests focus drift. With a focuser temperature
+(`FOCTEMP`, `FOCUSTEM`) that is used instead, as the tube's. With a focuser
+position (`FOCUSPOS`, `FOCPOS`) that changes during the session, another line
+gives how much FWHM grows between moves: the median, over runs of at least
+6 frames at one position, of the last 3 frames' FWHM against the first 3.
+Growth means focus drifts faster than the autofocus runs:
 
 ```
-Session: 1340 frames, 26 flagged
+Session: 1340 frames, 31 flagged
 Reference frame for registration: Light1135.fits (best wFWHM 3.46 px, 4445 stars)
 
 Metric      Median    σ (MAD)  Min       Max      Trend
@@ -219,7 +230,7 @@ only the middle of the reference frame has full depth; crop to it. Plate
 solutions (`ASTRSOLV` not false) of the unflagged frames give the answer:
 
 ```
-Stack coverage: 1310 plate-solved frames, field rotates 132°
+Stack coverage: 1305 plate-solved frames, field rotates 132°
   every frame over 42% of the reference frame, 90% of frames over 47%, half over 71%
 ```
 
@@ -227,8 +238,8 @@ Finally, a recommendation for PixInsight's DrizzleIntegration, based on the
 frames that were not flagged:
 
 ```
-Drizzle: 1314 unflagged frames, dither measured from plate solutions: stars move up to 2480 px, field rotates 132° (4 unsolved frames left out)
-  Sampling        median FWHM 5.05 px, well sampled (drizzle adds resolution below 2.5 px)
+Drizzle: 1309 unflagged frames, dither measured from plate solutions: stars move up to 2480 px, field rotates 132° (4 unsolved frames left out)
+  Sampling        median FWHM 5.04 px, well sampled (drizzle adds resolution below 2.5 px)
   Recommendation  CFA drizzle, Scale 1, Drop shrink 1.00
                   recovers full colour resolution without debayer interpolation
   Expected        weights image rms 11% of median (keep under 20%), noise correlation R 1.50
@@ -313,10 +324,10 @@ you can see them before a multi-hour run:
   (15+ frames) is available but never picked automatically.
 
 ```
-WBPP: 1314 unflagged frames
+WBPP: 1309 unflagged frames
   Integration     fast integration, which WBPP enables at 150+ frames: no minimum weight or rejection algorithm to set
   Autocrop        keeps about 1687 × 1635 px, 33% of the reference frame (where 75%+ of frames overlap)
-  Normalization   gradients differ between frames by 53.9 ADU across the field (median), 7.7× the stack's noise;
+  Normalization   gradients differ between frames by 54.0 ADU across the field (median), 7.7× the stack's noise;
                   WBPP skips local normalization under fast integration: turn that off to apply it, or remove the gradient from the master
   Weighting       none (default)  SNR  96.3% of best, stack FWHM ≈ 5.34 px
                   Resolution      SNR  92.8%, ≈ 4.99 px
@@ -395,7 +406,8 @@ Sub length: 15 s subs
 | Sky R, Sky G, Sky B | Colour cameras only: sigma-clipped sky level in the raw red, green and blue pixels, before 2×2 binning mixes them. Moonlight and twilight raise blue most, sodium light pollution red. Which row `BAYERPAT` starts from differs between programs, so the loader takes the reading under which the two green pixels agree |
 | Hot | Hot pixel level: median excess over background, in ADU, of the 500th to 1500th brightest single-pixel maxima. It follows sensor temperature (dark current), so compare it between frames, not cameras. Not a count, which would follow the sky noise |
 | Sky mag | Sky brightness in V mag/arcsec² implied by the photon noise: each raw pixel's noise less read noise and the chip's dark current is the sky's shot noise, which the camera preset's peak QE and colour response (astro-recommender's, from the makers' charts), the aperture (`APTDIA`), central obstruction and throughput (0.81 for the Origins' RASA, else 0.85) and the plate scale turn into photons per arcsec², taking the sky as flat over 400–700 nm and a V = 0 source as 1005 photons s⁻¹ cm⁻² Å⁻¹ (Bessell 1998). It counts target light as sky and is good to about ±0.3 mag: compare nights, not an SQM. Needs a camera preset or a chip matched by its pixels, gain and read noise. The integration table's Bortle class moves it to the zenith (Krisciunas & Schaefer 1991, k = 0.2) and uses DarkSkySites' bands; moonlight counts |
-| Flags | Metrics where the frame is an outlier among its filter's frames: high FWHM, Ecc, Resid, Background or Gradient, or low Stars, SNR, PSF SNR, PSFSW or SNRW |
+| Trails | Satellite, aircraft and meteor trails: in the frame binned 4×4, blobs over a 16×16-bin median sky by 3× the noise that are at least a tenth of the shorter side long and 8× longer than wide (second moments); segments on one line count once. After ASTAP's (length² / area > 3), but with moments a star or a blob of stars never passes. It finds trails twice the pixel noise or brighter; two trails crossing join into one blob and are missed. A frame with more trails than its filter's median is flagged: WBPP's fast integration (150+ frames) has no rejection to remove them |
+| Flags | Metrics where the frame is an outlier among its filter's frames: high FWHM, Ecc, Resid, Background, Gradient or Trails, or low Stars, SNR, PSF SNR, PSFSW or SNRW |
 
 Unknown values print as `-`, are empty in CSV and are omitted keys in JSON.
 
@@ -404,8 +416,8 @@ metrics, not the session sections. Keys: `file`, `date`, `filter`,
 `exptime`, `ccd_temp`, `altitude`, `moon_alt`, `sun_alt`, `stars`,
 `fwhm_px`, `wfwhm`, `fwhm_arcsec`, `eccentricity`, `psf_residual`, `snr`,
 `psf_snr`, `psf_signal_weight`, `snr_weight`, `background`, `stddev`,
-`noise_mrs`, `gradient`, `sky_r`, `sky_g`, `sky_b`, `sky_mag`, `hot_pixel_level` and
-`flags`.
+`noise_mrs`, `gradient`, `sky_r`, `sky_g`, `sky_b`, `sky_mag`, `hot_pixel_level`,
+`trails` and `flags`.
 
 ## How it measures
 

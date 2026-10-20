@@ -107,8 +107,14 @@ func overview(w io.Writer, frames []Frame, label string) {
 		return // no DATE-OBS
 	}
 
+	// A header SQM checks Sky mag; the column only shows when frames have one.
+	meter := slices.ContainsFunc(frames, func(f Frame) bool { return !math.IsNaN(f.Result.SQM) })
+	sqmHead := ""
+	if meter {
+		sqmHead = "\tSQM header"
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  Night\tFrames\tTime\tFWHM px\tBackground\tSky mag\tBortle\tGradient\tMoon lit\tMoon up\tMoon dist\tTwilight")
+	fmt.Fprintln(tw, "  Night\tFrames\tTime\tFWHM px\tBackground\tSky mag\tBortle"+sqmHead+"\tGradient\tMoon lit\tMoon up\tMoon dist\tTwilight")
 	for _, n := range nights {
 		sub := subset(frames, n.idx)
 		col := func(get func(f Frame) float64) []float64 {
@@ -130,6 +136,10 @@ func overview(w io.Writer, frames []Frame, label string) {
 				dusk++
 			}
 		}
+		sqm := ""
+		if meter {
+			sqm = "\t" + format(stats.MedianOf(col(func(f Frame) float64 { return f.Result.SQM })), 2)
+		}
 		moonUp, twi := "-", "-"
 		if !math.IsNaN(sub[0].Result.MoonAlt) {
 			moonUp, twi = fmt.Sprintf("%.0f%%", 100*float64(up)/float64(len(sub))), strconv.Itoa(dusk)
@@ -138,7 +148,7 @@ func overview(w io.Writer, frames []Frame, label string) {
 			format(stats.MedianOf(col(func(f Frame) float64 { return f.Result.FWHM })), 2),
 			format(stats.MedianOf(col(func(f Frame) float64 { return f.Result.Bg })), 1),
 			format(stats.MedianOf(col(func(f Frame) float64 { return f.SkyMag })), 2),
-			bortle(stats.MedianOf(col(func(f Frame) float64 { return zenith(f.SkyMag, f.Result.Alt) }))),
+			bortle(stats.MedianOf(col(func(f Frame) float64 { return zenith(f.SkyMag, f.Result.Alt) })))+sqm,
 			gradient(sub),
 			percent(stats.MedianOf(col(func(f Frame) float64 { return f.Result.MoonIllum }))),
 			moonUp,

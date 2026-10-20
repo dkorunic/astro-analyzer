@@ -2,7 +2,8 @@
 
 Go CLI that measures FITS astrophotography subframes (stars, FWHM,
 eccentricity, SNR and PixInsight's PSF SNR / PSFSW / SNRW weights, sky
-background, brightness and gradient, wavelet noise, hot pixels), flags
+background, brightness and gradient, wavelet noise, hot pixels, satellite
+trails), flags
 outlier frames, maps star shape across the field and reports per session:
 integration per night with Moon, twilight and Bortle class,
 calibration-frame checks (headers, bias banding, dark pedestal and hot
@@ -36,7 +37,7 @@ Dependencies only point downward in this list:
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
 | `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and camera presets (`subs.go`), chip QE, colour response and dark current, sky brightness and Bortle class (`sky.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
-| `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, PSF SNR/PSFSW/SNRW, gradient, hot level, raw pixel noise, Sun/Moon, 3×3 field cells |
+| `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, PSF SNR/PSFSW/SNRW, gradient, hot level, trails (`trails.go`), raw pixel noise, Sun/Moon, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
 | `internal/sky` | Low-precision Sun and Moon positions (Astronomical Almanac), altitude, illumination |
 | `internal/stats` | Median/MAD, outlier rule, Spearman, Chauvenet (RCR), sigma-clipped sky, wavelet MRS noise + background map, sky gradient plane, M* and two-sided scale (PSFSW, SNRW) |
@@ -205,3 +206,9 @@ by the default run.
   (`BPP-Pipeline.js:626,662`, `BPP-Operations.js:1578`). Gradient
   comparisons for LN must be made on the reference frame's grid: an alt-az
   light dome is fixed to the sensor and turns on the sky.
+- Trails (`trails.go`) use a block-median sky, not the wavelet map
+  `local`: around bright stars `local` is off by thousands of ADU per
+  4×4 bin, which fragments a trail. The threshold uses the MRS noise, not
+  the binned spread, which faint stars widen. Verified on the Western Veil
+  session (413 frames, every frame inspected): both trails found, no false
+  ones on the filaments or cloud gradients.
