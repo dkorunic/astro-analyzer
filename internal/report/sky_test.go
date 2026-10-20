@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/dkorunic/astro-analyzer/internal/analyze"
+	"github.com/dkorunic/astro-analyzer/internal/fits"
 )
 
 // TestSkyMag checks the photon arithmetic on an Origin Mark II frame: 2
@@ -60,6 +61,29 @@ func TestPresetChips(t *testing.T) {
 	for _, p := range readNoisePresets {
 		if _, ok := chips[p.chip]; !ok {
 			t.Errorf("%s: chip %q has no entry in chips", p.camera, p.chip)
+		}
+	}
+}
+
+// TestChipOf checks chip matching by pixel pitch and size: binning,
+// orientation, version and ambiguity.
+func TestChipOf(t *testing.T) {
+	for _, c := range []struct {
+		m    fits.Meta
+		want string
+	}{
+		{fits.Meta{Pixel: 3.76, Size: [2]int{6280, 4210}, CFA: true}, "IMX571"}, // QHY268C
+		{fits.Meta{Pixel: 7.52, Size: [2]int{3124, 2088}}, "IMX571"},            // 2×2 binned mono
+		{fits.Meta{Pixel: 3.76, Size: [2]int{4176, 6248}}, "IMX571"},            // portrait
+		{fits.Meta{Pixel: 4.63, Size: [2]int{4144, 2822}, CFA: true}, "IMX294"}, // colour: not the IMX492
+		{fits.Meta{Pixel: 4.63, Size: [2]int{4144, 2822}}, "IMX492"},            // mono
+		{fits.Meta{Pixel: 2.9, Size: [2]int{1920, 1080}, CFA: true}, "IMX662"},  // not the IMX290's 1936 × 1096
+		{fits.Meta{Pixel: 2.9, Size: [2]int{1936, 1096}, CFA: true}, ""},        // IMX290 or IMX462
+		{fits.Meta{Pixel: 3.76, Size: [2]int{2000, 1500}, CFA: true}, ""},       // cropped
+		{fits.Meta{Size: [2]int{6248, 4176}, CFA: true}, ""},                    // no XPIXSZ
+	} {
+		if got := chipOf(c.m); got != c.want {
+			t.Errorf("chipOf(%v µm %v, CFA %v) = %q, want %q", c.m.Pixel, c.m.Size, c.m.CFA, got, c.want)
 		}
 	}
 }

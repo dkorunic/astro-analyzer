@@ -57,7 +57,11 @@ func equipment(m fits.Meta) string {
 	if s := strings.TrimSpace(scope); s != "" {
 		parts = append(parts, s)
 	}
-	if m.Camera != "" {
+	if p, ok := preset(m); ok && p.camera == "" {
+		parts = append(parts, strings.TrimSpace(m.Camera+" ("+p.label+")"))
+	} else if ok {
+		parts = append(parts, m.Camera+" ("+p.chip+")")
+	} else if m.Camera != "" {
 		parts = append(parts, m.Camera)
 	}
 	if m.Bayer != "" {

@@ -87,7 +87,9 @@ var readNoisePresets = []readNoisePreset{
 	{camera: "Neptune-C II", label: "IMX464 at gain 83", setting: 83, rn: 1.2, chip: "IMX464"},
 }
 
-// preset returns the frame's camera preset, at any gain setting.
+// preset returns the frame's camera preset, at any gain setting. A camera
+// without one (QHY, ToupTek, Player One...) gets its chip from its pixels,
+// with no read noise.
 func preset(m fits.Meta) (readNoisePreset, bool) {
 	cam := strings.ToUpper(m.Camera)
 	for _, p := range readNoisePresets {
@@ -95,8 +97,51 @@ func preset(m fits.Meta) (readNoisePreset, bool) {
 			return p, true
 		}
 	}
+	if c := chipOf(m); c != "" {
+		return readNoisePreset{chip: c, label: c + " by its pixels", setting: math.NaN(), rn: math.NaN()}, true
+	}
 
 	return readNoisePreset{}, false
+}
+
+// geometryTol is how far a frame's pitch and size may sit from a chip's:
+// effective pixels differ from the nominal by up to 1.5% (Origin 3056 ×
+// 2048 on a 3096 × 2080 IMX178, QHY268 6280 × 4210 on a 6248 × 4176
+// IMX571).
+const geometryTol = 0.02
+
+// chipOf is the chip whose pitch and size are closest to the frame's
+// XPIXSZ and NAXIS, at some binning, among those within geometryTol that
+// ship in its version (colour or mono); "" when none is, or two match
+// equally (the IMX290 and IMX462 share their geometry).
+//
+// ponytail: a cropped (ROI) frame matches nothing; the IMX492 only at
+// ZWO's default 2×2 binning, as charted.
+func chipOf(m fits.Meta) string {
+	if !(m.Pixel > 0) {
+		return ""
+	}
+	size := [2]float64{float64(max(m.Size[0], m.Size[1])), float64(min(m.Size[0], m.Size[1]))}
+	found, best, tie := "", geometryTol, false
+	for name, c := range chips {
+		if c.pixel == 0 || (m.CFA && c.qe == 0) || (!m.CFA && c.monoQE == 0) {
+			continue
+		}
+		bin := max(math.Round(m.Pixel/c.pixel), 1)
+		d := max(math.Abs(m.Pixel/(bin*c.pixel)-1),
+			math.Abs(size[0]*bin/float64(c.px[0])-1), math.Abs(size[1]*bin/float64(c.px[1])-1))
+		switch {
+		case d < best:
+			found, best, tie = name, d, false
+		case d == best && found != "":
+			tie = true
+		}
+	}
+	if tie {
+		return ""
+	}
+
+	return found
 }
 
 // presetReadNoise returns the read noise preset for the frame's camera and

@@ -26,6 +26,10 @@ type chip struct {
 	// IMX366's and MN34230's from charts astro-recommender leaves out of
 	// its typicalDark); 0: none published.
 	dark float64
+	// pixel is the pixel pitch (µm) and px the long and short side in
+	// pixels, which name the chip when the camera has no preset.
+	pixel float64
+	px    [2]int
 }
 
 // typicalDark is the median of the charted CMOS chips' dark current at
@@ -46,33 +50,33 @@ const (
 )
 
 var chips = map[string]chip{
-	imx678:    {broad: [3]float64{0.397, 0.565, 0.394}, qe: 0.83, monoQE: 0.83, monoBroad: sonyMono},
-	imx178:    {broad: [3]float64{0.299, 0.431, 0.319}, qe: 0.70, monoQE: 0.81, monoBroad: 0.833, dark: 0.95},
-	"IMX492":  {monoQE: 0.90, monoBroad: 0.859, dark: 0.37},
-	"IMX294":  {broad: [3]float64{0.321, 0.445, 0.321}, qe: 0.75, dark: 0.37},
-	"IMX571":  {broad: [3]float64{0.292, 0.437, 0.324}, qe: 0.80, monoQE: 0.91, monoBroad: 0.836, dark: 0.065},
-	"IMX410":  {broad: [3]float64{0.324, 0.403, 0.315}, qe: 0.80},
-	"IMX455":  {broad: [3]float64{0.284, 0.396, 0.300}, qe: 0.80, monoQE: 0.91, monoBroad: 0.836},
-	"IMX533":  {broad: [3]float64{0.288, 0.437, 0.328}, qe: 0.80, monoQE: 0.91, monoBroad: 0.836, dark: 0.063},
-	"IMX585":  {broad: [3]float64{0.382, 0.461, 0.310}, qe: 0.91, monoQE: 0.91, monoBroad: sonyMono, dark: 0.25},
-	"IMX183":  {monoQE: 0.84, monoBroad: 0.844},
-	"IMX662":  {broad: starvis2, qe: 0.91, monoQE: 0.91, monoBroad: 0.929},
-	"IMX664":  {broad: starvis2, qe: 0.91},
-	"IMX676":  {broad: [3]float64{0.373, 0.559, 0.368}, qe: 0.83, monoQE: 0.83, monoBroad: 0.939, dark: 0.060},
-	"IMX461":  {monoQE: 0.91, monoBroad: 0.836},
-	"IMX432":  {monoQE: 0.79, monoBroad: 0.909},
-	"IMX174":  {monoQE: 0.77, monoBroad: 0.823},
-	"IMX462":  {broad: [3]float64{0.414, 0.502, 0.391}, qe: 0.81, monoQE: 0.89, monoBroad: 0.887},
-	"IMX485":  {broad: [3]float64{0.380, 0.485, 0.342}, qe: 0.85},
-	"IMX482":  {broad: [3]float64{0.380, 0.485, 0.342}, qe: 0.85}, // the IMX485's chart
-	"IMX224":  {broad: [3]float64{0.377, 0.465, 0.314}, qe: 0.78},
-	"IMX464":  {broad: [3]float64{0.359, 0.482, 0.366}, qe: 0.90},
-	"IMX715":  {broad: [3]float64{0.376, 0.554, 0.360}, qe: 0.80},
-	"IMX366":  {broad: [3]float64{0.320, 0.459, 0.329}, qe: 0.80, dark: 0.126},
-	"IMX290":  {broad: [3]float64{0.354, 0.462, 0.306}, qe: 0.81, monoQE: 0.81, monoBroad: 0.887},
-	"MN34230": {broad: [3]float64{0.359, 0.410, 0.292}, qe: 0.60, monoQE: 0.60, monoBroad: 0.829, dark: 0.40},
-	"SC2210":  {monoQE: 0.92, monoBroad: 0.942},
-	"AR0130":  {monoQE: 0.78, monoBroad: 0.895},
+	imx678:    {broad: [3]float64{0.397, 0.565, 0.394}, qe: 0.83, monoQE: 0.83, monoBroad: sonyMono, pixel: 2.0, px: [2]int{3840, 2160}},
+	imx178:    {broad: [3]float64{0.299, 0.431, 0.319}, qe: 0.70, monoQE: 0.81, monoBroad: 0.833, dark: 0.95, pixel: 2.4, px: [2]int{3096, 2080}},
+	"IMX492":  {monoQE: 0.90, monoBroad: 0.859, dark: 0.37, pixel: 4.63, px: [2]int{4144, 2822}},
+	"IMX294":  {broad: [3]float64{0.321, 0.445, 0.321}, qe: 0.75, dark: 0.37, pixel: 4.63, px: [2]int{4144, 2822}},
+	"IMX571":  {broad: [3]float64{0.292, 0.437, 0.324}, qe: 0.80, monoQE: 0.91, monoBroad: 0.836, dark: 0.065, pixel: 3.76, px: [2]int{6248, 4176}},
+	"IMX410":  {broad: [3]float64{0.324, 0.403, 0.315}, qe: 0.80, pixel: 5.94, px: [2]int{6072, 4042}},
+	"IMX455":  {broad: [3]float64{0.284, 0.396, 0.300}, qe: 0.80, monoQE: 0.91, monoBroad: 0.836, pixel: 3.76, px: [2]int{9576, 6388}},
+	"IMX533":  {broad: [3]float64{0.288, 0.437, 0.328}, qe: 0.80, monoQE: 0.91, monoBroad: 0.836, dark: 0.063, pixel: 3.76, px: [2]int{3008, 3008}},
+	"IMX585":  {broad: [3]float64{0.382, 0.461, 0.310}, qe: 0.91, monoQE: 0.91, monoBroad: sonyMono, dark: 0.25, pixel: 2.9, px: [2]int{3840, 2160}},
+	"IMX183":  {monoQE: 0.84, monoBroad: 0.844, pixel: 2.4, px: [2]int{5496, 3672}},
+	"IMX662":  {broad: starvis2, qe: 0.91, monoQE: 0.91, monoBroad: 0.929, pixel: 2.9, px: [2]int{1920, 1080}},
+	"IMX664":  {broad: starvis2, qe: 0.91, pixel: 2.9, px: [2]int{2704, 1536}},
+	"IMX676":  {broad: [3]float64{0.373, 0.559, 0.368}, qe: 0.83, monoQE: 0.83, monoBroad: 0.939, dark: 0.060, pixel: 2.0, px: [2]int{3552, 3552}},
+	"IMX461":  {monoQE: 0.91, monoBroad: 0.836, pixel: 3.76, px: [2]int{11656, 8750}},
+	"IMX432":  {monoQE: 0.79, monoBroad: 0.909, pixel: 9.0, px: [2]int{1608, 1104}},
+	"IMX174":  {monoQE: 0.77, monoBroad: 0.823, pixel: 5.86, px: [2]int{1936, 1216}},
+	"IMX462":  {broad: [3]float64{0.414, 0.502, 0.391}, qe: 0.81, monoQE: 0.89, monoBroad: 0.887, pixel: 2.9, px: [2]int{1936, 1096}},
+	"IMX485":  {broad: [3]float64{0.380, 0.485, 0.342}, qe: 0.85, pixel: 2.9, px: [2]int{3840, 2160}},
+	"IMX482":  {broad: [3]float64{0.380, 0.485, 0.342}, qe: 0.85, pixel: 5.8, px: [2]int{1920, 1080}}, // the IMX485's chart
+	"IMX224":  {broad: [3]float64{0.377, 0.465, 0.314}, qe: 0.78, pixel: 3.75, px: [2]int{1304, 976}},
+	"IMX464":  {broad: [3]float64{0.359, 0.482, 0.366}, qe: 0.90, pixel: 2.9, px: [2]int{2712, 1538}},
+	"IMX715":  {broad: [3]float64{0.376, 0.554, 0.360}, qe: 0.80, pixel: 1.45, px: [2]int{3864, 2192}},
+	"IMX366":  {broad: [3]float64{0.320, 0.459, 0.329}, qe: 0.80, dark: 0.126, pixel: 4.4, px: [2]int{8192, 5460}},
+	"IMX290":  {broad: [3]float64{0.354, 0.462, 0.306}, qe: 0.81, monoQE: 0.81, monoBroad: 0.887, pixel: 2.9, px: [2]int{1936, 1096}},
+	"MN34230": {broad: [3]float64{0.359, 0.410, 0.292}, qe: 0.60, monoQE: 0.60, monoBroad: 0.829, dark: 0.40, pixel: 3.8, px: [2]int{4656, 3520}},
+	"SC2210":  {monoQE: 0.92, monoBroad: 0.942, pixel: 4.0, px: [2]int{1920, 1080}},
+	"AR0130":  {monoQE: 0.78, monoBroad: 0.895, pixel: 3.75, px: [2]int{1280, 960}},
 }
 
 // darkRate is the chip's dark current at sensor temperature t (°C), e⁻/s

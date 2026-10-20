@@ -86,6 +86,7 @@ type Meta struct {
 	Exp, Temp, Alt     float64
 	Setting            float64 // camera gain setting: GAIN, else ISOSPEED; NaN if absent
 	Plate              float64 // arcsec per original pixel, 0 if unknown
+	Pixel              float64 // XPIXSZ, µm, binning included; 0 if unknown
 	Aperture, FocalLen float64 // mm
 	Lat, Lon           float64 // site, degrees, east positive
 	RA, Dec            float64 // target (frame centre), degrees
@@ -563,6 +564,7 @@ func meta(hdr *fitsio.Header, axes []int, typ string) Meta {
 	}
 	// XPIXSZ already includes binning per the FITS convention (MaxIm DL, N.I.N.A.).
 	px, _ := num(hdr, "XPIXSZ")
+	m.Pixel = max(px, 0)
 	fl, _ := num(hdr, "FOCALLEN")
 	cd := m.WCS.CD
 	det := cd[0][0]*cd[1][1] - cd[0][1]*cd[1][0]

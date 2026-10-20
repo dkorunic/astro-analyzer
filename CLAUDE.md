@@ -160,7 +160,9 @@ by the default run.
 - Camera and chip constants (QE, colour response, dark current) come from
   astro-recommender's `internal/config/cameras.go`; keep them in step.
   Seestar S50 frames say `INSTRUME = 'ZWO ASI462MC'`, so the ASI462
-  preset covers it.
+  preset covers it. A camera with no preset gets its chip from `XPIXSZ`
+  and `NAXIS` (`chipOf`, closest within 2%, ties give none); effective
+  pixels sit up to 1.5% off nominal (Origin178 3056 × 2048 vs 3096 × 2080).
 - Per-pixel noise in electrons comes from raw same-colour neighbours
   (`pixNoise`, before binning), not the binned MRS noise: on Origin frames
   2×2 binning lowers the noise only 1.7×, not 2×, so neighbouring raw

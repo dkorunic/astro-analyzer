@@ -123,7 +123,7 @@ stored row, so its CFA pattern Auto would be wrong there: set that pattern
 explicitly in WBPP or Debayer.
 
 ```
-Bubble Nebula · RASA6F2 152 mm f/2.2 · Origin678C-643c1983c23be8af7 · CFA GBRG · 1.23"/px, field 79′ × 45′
+Bubble Nebula · RASA6F2 152 mm f/2.2 · Origin678C-643c1983c23be8af7 (IMX678) · CFA GBRG · 1.23"/px, field 79′ × 45′
 
 Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 29 min unflagged, over 2 nights
   Night       Frames  Time         FWHM px  Background  Sky mag  Bortle  Gradient  Moon lit  Moon up  Moon dist  Twilight
@@ -347,7 +347,14 @@ subs would do better, for the same total time:
   that 5% is an acceptable cost (Robin Glover, 2019). With `CCD-TEMP`
   it also estimates the dark current's part: the chip's at 25 °C from its
   maker's chart (0.16 e⁻/s, the charted chips' median, where none is
-  published, as for the IMX678), doubling every 5 °C.
+  published, as for the IMX678), doubling every 5 °C. A camera without a
+  preset (QHY, ToupTek, another Player One...) gets its chip from its
+  pixels: the closest pitch (`XPIXSZ`) and size (`NAXIS`, either
+  orientation, at any binning) within 2% among the chips of its version
+  (colour or mono), none when two match equally (IMX290 and IMX462). It
+  gives the chip's QE and dark current, not its read noise: set
+  `-read-noise` or add bias frames. The overview shows the chip after the
+  camera, "by its pixels" when matched this way.
 - **Field rotation** of an alt-az mount turns the field during each sub,
   smearing corner stars tangentially by r·ω·t. The rate ω comes from
   consecutive plate solutions; equatorial mounts show none.
@@ -387,7 +394,7 @@ Sub length: 15 s subs
 | Gradient | Range in ADU across the frame of a plane fitted to the sky (median of a 16-wide grid of cells). Cells well above the plane, mostly nebula, are left out; `-` when nebula fills most of the frame. Moonlight, light domes and twilight raise it |
 | Sky R, Sky G, Sky B | Colour cameras only: sigma-clipped sky level in the raw red, green and blue pixels, before 2×2 binning mixes them. Moonlight and twilight raise blue most, sodium light pollution red. Which row `BAYERPAT` starts from differs between programs, so the loader takes the reading under which the two green pixels agree |
 | Hot | Hot pixel level: median excess over background, in ADU, of the 500th to 1500th brightest single-pixel maxima. It follows sensor temperature (dark current), so compare it between frames, not cameras. Not a count, which would follow the sky noise |
-| Sky mag | Sky brightness in V mag/arcsec² implied by the photon noise: each raw pixel's noise less read noise and the chip's dark current is the sky's shot noise, which the camera preset's peak QE and colour response (astro-recommender's, from the makers' charts), the aperture (`APTDIA`), central obstruction and throughput (0.81 for the Origins' RASA, else 0.85) and the plate scale turn into photons per arcsec², taking the sky as flat over 400–700 nm and a V = 0 source as 1005 photons s⁻¹ cm⁻² Å⁻¹ (Bessell 1998). It counts target light as sky and is good to about ±0.3 mag: compare nights, not an SQM. Needs a camera preset, gain and read noise. The integration table's Bortle class moves it to the zenith (Krisciunas & Schaefer 1991, k = 0.2) and uses DarkSkySites' bands; moonlight counts |
+| Sky mag | Sky brightness in V mag/arcsec² implied by the photon noise: each raw pixel's noise less read noise and the chip's dark current is the sky's shot noise, which the camera preset's peak QE and colour response (astro-recommender's, from the makers' charts), the aperture (`APTDIA`), central obstruction and throughput (0.81 for the Origins' RASA, else 0.85) and the plate scale turn into photons per arcsec², taking the sky as flat over 400–700 nm and a V = 0 source as 1005 photons s⁻¹ cm⁻² Å⁻¹ (Bessell 1998). It counts target light as sky and is good to about ±0.3 mag: compare nights, not an SQM. Needs a camera preset or a chip matched by its pixels, gain and read noise. The integration table's Bortle class moves it to the zenith (Krisciunas & Schaefer 1991, k = 0.2) and uses DarkSkySites' bands; moonlight counts |
 | Flags | Metrics where the frame is an outlier among its filter's frames: high FWHM, Ecc, Resid, Background or Gradient, or low Stars, SNR, PSF SNR, PSFSW or SNRW |
 
 Unknown values print as `-`, are empty in CSV and are omitted keys in JSON.
