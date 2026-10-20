@@ -31,6 +31,9 @@ type Frame struct {
 	// WFWHM is Siril's weighted FWHM, set by Score: it depends on the
 	// whole session, so it is not part of the per-frame Result.
 	WFWHM float64
+	// SkyMag is the sky brightness in V mag/arcsec², set by SkyBrightness:
+	// it needs the session's read noise.
+	SkyMag float64
 }
 
 // metric is one numeric column. It drives the table, CSV/JSON keys, the
@@ -65,6 +68,7 @@ var metrics = []metric{
 	{name: "Sky R", key: "sky_r", prec: 1, bad: 0, get: func(f Frame) float64 { return f.Result.Sky[0] }},
 	{name: "Sky G", key: "sky_g", prec: 1, bad: 0, get: func(f Frame) float64 { return f.Result.Sky[1] }},
 	{name: "Sky B", key: "sky_b", prec: 1, bad: 0, get: func(f Frame) float64 { return f.Result.Sky[2] }},
+	{name: "Sky mag", key: "sky_mag", prec: 2, bad: 0, get: func(f Frame) float64 { return f.SkyMag }}, // same signal as Background
 	{name: "Hot", key: "hot_pixel_level", prec: 1, bad: 0, get: func(f Frame) float64 { return f.Result.Hot }},
 }
 

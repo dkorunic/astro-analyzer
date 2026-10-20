@@ -9,7 +9,8 @@ FITS subframes: star count, FWHM, eccentricity, SNR, sky background and
 noise, gradient, hot pixels and PixInsight's PSF SNR, PSF Signal Weight
 and SNRW frame weights. It flags bad frames, shows how a session evolved over the
 night (and warns of focus drift with temperature), sums integration time
-per filter and night with the Moon and twilight conditions, checks the
+per filter and night with the Moon, twilight and the sky brightness
+(mag/arcsec² and Bortle class, from the frames' own noise), checks the
 session's bias, dark and flat frames against the lights (settings, banding,
 dark pedestal and hot pixels, dust, photon-transfer gain, master noise),
 maps how star shapes vary across the field to diagnose tilt, coma and
@@ -81,7 +82,7 @@ measured so far.
 | `-psf` | `moffat4` | PSF model: `moffat4` (PixInsight's default), `moffat` (free β, ~8× slower) or `gaussian` |
 | `-sigma` | `5` | Star detection threshold, in noise sigmas above the local background |
 | `-gain` | from `EGAIN` | Camera gain in e⁻/ADU. Without it the photon-noise term is left out of SNR, as PixInsight does |
-| `-read-noise` | camera preset | Read noise in e⁻ for the sub-length comparison. Without it, read from the session's bias frames, else a preset: Celestron Origin and Origin Mark II, 21 ZWO cameras and the Player One Neptune-C II at their deep-sky gain (`GAIN` header) |
+| `-read-noise` | camera preset | Read noise in e⁻ for the sub-length comparison. Without it, read from the session's bias frames, else a preset: Celestron Origin and Origin Mark II, 26 ZWO cameras (the Seestar S50 writes its ASI462MC) and the Player One Neptune-C II at their deep-sky gain (`GAIN` header) |
 | `-reject-sigma` | `3` | Flag a frame when it is worse than the session median by this many robust sigmas… |
 | `-reject-min` | `0.1` | …and by at least this fraction of the median, so stable sessions are not over-flagged |
 | `-best` | `100` | Also flag frames outside the best this percent per filter by wFWHM, as Siril's `stack -filter-wfwhm=N%` keeps them (e.g. `-best=90`) |
@@ -101,14 +102,15 @@ astro-analyzer -reject ~/astro/M27 | xargs -I{} mv {} ~/astro/M27/rejected/
 One row per frame, sorted by `DATE-OBS`:
 
 ```
-File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Hot     Flags
-Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  7436.3
-Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  7427.5  Resid
+File            Date                 Filter  Exp   Temp  Alt   Moon alt  Sun alt  Stars  FWHM px  wFWHM  FWHM "  Ecc   Resid   SNR  PSF SNR   PSFSW     SNRW   Background  StdDev  Noise   Gradient  Sky R   Sky G   Sky B   Sky mag  Hot     Flags
+Light0001.fits  2026-10-13T20:06:10  Nebula  15.0  25.9  62.1  -10       -20      4120   4.15     4.88   5.10    0.75  0.0047  3.9  0.000166  0.000375  0.631  6518.8      297.11  299.86  85.6      5775.0  6575.0  6975.0  19.72    7436.3
+Light0004.fits  2026-10-13T20:06:57  Nebula  15.0  25.7  62.2  -10       -20      3817   7.32     9.60   9.01    0.94  0.0058  3.7  0.000292  0.000188  0.633  6512.5      296.86  298.63  89.4      5775.0  6575.0  6975.0  19.72    7427.5  Resid
 ```
 
 Then the equipment and integration time per filter, with one row per
 observing night (noon to noon, local solar time): its median FWHM,
-background and sky gradient (with an arrow toward the brighter side, top =
+background, sky brightness (Sky mag, with the Bortle class it gives at the
+zenith) and sky gradient (with an arrow toward the brighter side, top =
 last FITS row), how much of the Moon is lit, the share of frames with the Moon
 up, its median distance from the target, and frames taken in twilight (Sun
 above −18°). Nights differ in seeing and moonlight, which a session median
@@ -123,9 +125,9 @@ explicitly in WBPP or Debayer.
 Bubble Nebula · RASA6F2 152 mm f/2.2 · Origin678C-643c1983c23be8af7 · CFA GBRG · 1.23"/px, field 79′ × 45′
 
 Integration: 1340 frames × 15 s = 5 h 35 min, 5 h 29 min unflagged, over 2 nights
-  Night       Frames  Time         FWHM px  Background  Gradient  Moon lit  Moon up  Moon dist  Twilight
-  2026-10-13  658     20:06–00:06  5.43     6165.6      74.9 ←    10%       0%       124°       0
-  2026-10-16  682     20:11–00:20  4.76     6262.5      80.1 ←    33%       24%      108°       0
+  Night       Frames  Time         FWHM px  Background  Sky mag  Bortle  Gradient  Moon lit  Moon up  Moon dist  Twilight
+  2026-10-13  658     20:06–00:06  5.43     6165.6      20.08    6       74.9 ←    10%       0%       124°       0
+  2026-10-16  682     20:11–00:20  4.76     6262.5      20.04    6       80.1 ←    33%       24%      108°       0
 ```
 
 When the directories hold calibration frames, their headers are checked
@@ -337,10 +339,14 @@ subs would do better, for the same total time:
   difference over √2, which cancels the sensor's fixed pattern. A master
   of N frames (`NCOMBINE`/`NSTACK`) only bounds it, at √N times its pixel
   noise, pattern included. The Origin Mark II's preset,
-  1.1 e⁻ at ISO 1000, is an upper bound from its 9-frame bias master
-  (astro-recommender uses a vendor sheet's 2.15 e⁻); the original Origin's,
-  1.6 e⁻ at ISO 200, comes the same way. The rule of thumb is
-  that 5% is an acceptable cost (Robin Glover, 2019).
+  0.97 e⁻ at ISO 1000, is the higher of two sessions' upper bounds from
+  their 9-frame bias masters (0.93 and 0.97 e⁻; astro-recommender uses a
+  vendor sheet's 2.15 e⁻); the original Origin's, 1.5 e⁻ at ISO 200, comes
+  the same way. The rule of thumb is
+  that 5% is an acceptable cost (Robin Glover, 2019). With `CCD-TEMP`
+  it also estimates the dark current's part: the chip's at 25 °C from its
+  maker's chart (0.16 e⁻/s, the charted chips' median, where none is
+  published, as for the IMX678), doubling every 5 °C.
 - **Field rotation** of an alt-az mount turns the field during each sub,
   smearing corner stars tangentially by r·ω·t. The rate ω comes from
   consecutive plate solutions; equatorial mounts show none.
@@ -349,6 +355,7 @@ subs would do better, for the same total time:
 Sub length: 15 s subs
   Noise           5.5 e⁻ per pixel, read noise 0.92 e⁻ (≤, from this session's 9-frame bias master)
                   shot noise 2 e⁻/s (sky, target, dark): read noise costs ≤ 5% SNR from 4 s
+                  dark current ≈ 0.06 e⁻/s at 18 °C (a typical chip's, IMX678 uncharted, doubling every 5 °C)
   Field rotation  0.0076°/s median, 0.0121°/s p90; corner stars smear tangentially (median FWHM 5.08 px)
   Sub      SNR vs no read noise  Corner smear median / p90
   5 s      95.9%                 1.5 / 2.3 px
@@ -379,6 +386,7 @@ Sub length: 15 s subs
 | Gradient | Range in ADU across the frame of a plane fitted to the sky (median of a 16-wide grid of cells). Cells well above the plane, mostly nebula, are left out; `-` when nebula fills most of the frame. Moonlight, light domes and twilight raise it |
 | Sky R, Sky G, Sky B | Colour cameras only: sigma-clipped sky level in the raw red, green and blue pixels, before 2×2 binning mixes them. Moonlight and twilight raise blue most, sodium light pollution red. Which row `BAYERPAT` starts from differs between programs, so the loader takes the reading under which the two green pixels agree |
 | Hot | Hot pixel level: median excess over background, in ADU, of the 500th to 1500th brightest single-pixel maxima. It follows sensor temperature (dark current), so compare it between frames, not cameras. Not a count, which would follow the sky noise |
+| Sky mag | Sky brightness in V mag/arcsec² implied by the photon noise: each raw pixel's noise less read noise and the chip's dark current is the sky's shot noise, which the camera preset's peak QE and colour response (astro-recommender's, from the makers' charts), the aperture (`APTDIA`), central obstruction and throughput (0.81 for the Origins' RASA, else 0.85) and the plate scale turn into photons per arcsec², taking the sky as flat over 400–700 nm and a V = 0 source as 1005 photons s⁻¹ cm⁻² Å⁻¹ (Bessell 1998). It counts target light as sky and is good to about ±0.3 mag: compare nights, not an SQM. Needs a camera preset, gain and read noise. The integration table's Bortle class moves it to the zenith (Krisciunas & Schaefer 1991, k = 0.2) and uses DarkSkySites' bands; moonlight counts |
 | Flags | Metrics where the frame is an outlier among its filter's frames: high FWHM, Ecc, Resid, Background or Gradient, or low Stars, SNR, PSF SNR, PSFSW or SNRW |
 
 Unknown values print as `-`, are empty in CSV and are omitted keys in JSON.
@@ -388,7 +396,7 @@ metrics, not the session sections. Keys: `file`, `date`, `filter`,
 `exptime`, `ccd_temp`, `altitude`, `moon_alt`, `sun_alt`, `stars`,
 `fwhm_px`, `wfwhm`, `fwhm_arcsec`, `eccentricity`, `psf_residual`, `snr`,
 `psf_snr`, `psf_signal_weight`, `snr_weight`, `background`, `stddev`,
-`noise_mrs`, `gradient`, `sky_r`, `sky_g`, `sky_b`, `hot_pixel_level` and
+`noise_mrs`, `gradient`, `sky_r`, `sky_g`, `sky_b`, `sky_mag`, `hot_pixel_level` and
 `flags`.
 
 ## How it measures

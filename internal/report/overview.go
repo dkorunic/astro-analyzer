@@ -104,7 +104,7 @@ func overview(w io.Writer, frames []Frame, label string) {
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  Night\tFrames\tTime\tFWHM px\tBackground\tGradient\tMoon lit\tMoon up\tMoon dist\tTwilight")
+	fmt.Fprintln(tw, "  Night\tFrames\tTime\tFWHM px\tBackground\tSky mag\tBortle\tGradient\tMoon lit\tMoon up\tMoon dist\tTwilight")
 	for _, n := range nights {
 		sub := subset(frames, n.idx)
 		col := func(get func(f Frame) float64) []float64 {
@@ -130,9 +130,11 @@ func overview(w io.Writer, frames []Frame, label string) {
 		if !math.IsNaN(sub[0].Result.MoonAlt) {
 			moonUp, twi = fmt.Sprintf("%.0f%%", 100*float64(up)/float64(len(sub))), strconv.Itoa(dusk)
 		}
-		fmt.Fprintf(tw, "  %s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", cmp.Or(n.key, "-"), len(sub), n.span,
+		fmt.Fprintf(tw, "  %s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", cmp.Or(n.key, "-"), len(sub), n.span,
 			format(stats.MedianOf(col(func(f Frame) float64 { return f.Result.FWHM })), 2),
 			format(stats.MedianOf(col(func(f Frame) float64 { return f.Result.Bg })), 1),
+			format(stats.MedianOf(col(func(f Frame) float64 { return f.SkyMag })), 2),
+			bortle(stats.MedianOf(col(func(f Frame) float64 { return zenith(f.SkyMag, f.Result.Alt) }))),
 			gradient(sub),
 			percent(stats.MedianOf(col(func(f Frame) float64 { return f.Result.MoonIllum }))),
 			moonUp,

@@ -2,12 +2,13 @@
 
 Go CLI that measures FITS astrophotography subframes (stars, FWHM,
 eccentricity, SNR and PixInsight's PSF SNR / PSFSW / SNRW weights, sky
-background and gradient, wavelet noise, hot pixels), flags outlier frames,
-maps star shape across the field and reports per session: integration per
-night with Moon and twilight, calibration-frame checks (headers, bias
-banding, dark pedestal and hot pixels, flats, photon-transfer gain, master
-noise), stack coverage, drizzle and WBPP settings, and a sub-length
-comparison. Runs fully locally. User-facing docs are in README.md.
+background, brightness and gradient, wavelet noise, hot pixels), flags
+outlier frames, maps star shape across the field and reports per session:
+integration per night with Moon, twilight and Bortle class,
+calibration-frame checks (headers, bias banding, dark pedestal and hot
+pixels, flats, photon-transfer gain, master noise), stack coverage,
+drizzle and WBPP settings, and a sub-length comparison. Runs fully
+locally. User-facing docs are in README.md.
 
 ## Commands
 
@@ -33,7 +34,7 @@ Dependencies only point downward in this list:
 | Package | Role |
 |---|---|
 | `main.go` | Flags, directory walk (`expand`), worker pool, output selection |
-| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and read-noise presets (`subs.go`), CSV/JSON |
+| `internal/report` | Metric table, outlier flags, overview (equipment, integration per night), calibration checks: headers, banding, dark pedestal and hot pixels, flats, photon-transfer gain, master noise, bias read noise (`calib.go`), session summary + focus drift + sparklines, field map, stack coverage, WBPP predictions (`wbpp.go`), sub-length comparison and camera presets (`subs.go`), chip QE, colour response and dark current, sky brightness and Bortle class (`sky.go`), CSV/JSON |
 | `internal/drizzle` | DrizzleIntegration Scale / Drop shrink recommendation from sampling and plate-solved dither |
 | `internal/analyze` | Per-frame pipeline: detection, half-max seed, aperture SNR, PSF fits, medians, PSF SNR/PSFSW/SNRW, gradient, hot level, raw pixel noise, Sun/Moon, 3×3 field cells |
 | `internal/psf` | Levenberg–Marquardt fit of `gaussian`, `moffat4` (default) and `moffat` models |
@@ -44,7 +45,8 @@ Dependencies only point downward in this list:
 
 To add a per-frame metric: add the field to `analyze.Result`, compute it in
 `analyze.Frame`, then add one entry to `metrics` in `internal/report`. A
-score that depends on the session (like wFWHM) goes on `report.Frame`
+score that depends on the session (like wFWHM, or SkyMag, which needs the
+session's read noise) goes on `report.Frame`
 instead, set before `FlagOutliers`. That
 entry drives the table column, CSV/JSON key, summary row and outlier flag.
 
@@ -136,6 +138,9 @@ by the default run.
   `ErrNotLight`, plus `PixNoise` and `Level` for bias and darks (pixels are
   not kept); `report.Calibration` compares them with the lights'. Origin
   darks sit 120–410 ADU *below* their bias: no dark current is measurable.
+  Their 9-frame bias masters bound read noise at 0.93–0.97 e⁻ (Mark II,
+  two sessions) and 1.50 e⁻ (Origin178); the presets in `subs.go` take the
+  highest, so they stay upper bounds.
   Bias read noise uses the lights' `Result.Gain` (bias headers lack EGAIN).
   Darks are loaded in full and run through `analyze.Frame` (`calibFrame`)
   so their `Hot` compares with the lights'; set `Cal` after `Bin2`, which
@@ -148,6 +153,14 @@ by the default run.
   0.0055–0.0076 on nebula fields: always check the pedestal first. `Stack` (master lights, `NCOMBINE` > 1) is skipped, not listed.
   PixInsight writes `IMAGETYP = 'Master Light'`: matching on "LIGHT" alone
   measured a WBPP master as a sub.
+- `pixNoise` samples rows 0, 16, 32…: on a CFA only the first stored
+  row's two colours (green and blue on the Origin's GBRG, red and green
+  when `BayerFlip`). `response` in `sky.go` weights the chip's colour
+  response the same way; change both together.
+- Camera and chip constants (QE, colour response, dark current) come from
+  astro-recommender's `internal/config/cameras.go`; keep them in step.
+  Seestar S50 frames say `INSTRUME = 'ZWO ASI462MC'`, so the ASI462
+  preset covers it.
 - Per-pixel noise in electrons comes from raw same-colour neighbours
   (`pixNoise`, before binning), not the binned MRS noise: on Origin frames
   2×2 binning lowers the noise only 1.7×, not 2×, so neighbouring raw

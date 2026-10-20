@@ -33,57 +33,77 @@ const (
 // added, and only those within a factor of 4 of it are shown.
 var subLengths = []float64{2, 5, 10, 15, 20, 30, 60, 120, 180, 300, 600}
 
-// readNoisePreset is a camera's read noise at one gain setting. Presets
-// match INSTRUME/CAMERA by substring and only at that setting, as read
-// noise changes with gain.
+// readNoisePreset is a camera's read noise at one gain setting, its chip
+// (chips) and, for a smart telescope, what the header lacks: its central
+// obstruction (mm) and throughput. Presets match INSTRUME/CAMERA by
+// substring; the read noise only at that setting, as it changes with gain.
 type readNoisePreset struct {
-	camera, label string
-	setting, rn   float64
+	camera, label, chip     string
+	setting, rn             float64
+	obstruction, throughput float64
 }
 
 // readNoisePresets are from astro-recommender's camera presets (ZWO's
 // charts at its deep-sky gain, where high conversion gain switches on; the
 // colour and mono versions agree), October 2026. Longer names come first
 // where one contains another. The Origin Mark II's is measured: its
-// 9-frame bias master has a spatial σ of 32 ADU, and with 25 ADU per count
-// and EGAIN 0.2793 that bounds one frame's read noise at 3·32·0.0112 =
-// 1.1 e⁻ (astro-recommender's 2.15 is a vendor sheet's guess). The original
-// Origin's the same way: σ 32.2 ADU (biasStandardDeviation in its
-// dark0009.json), 3·32.2·0.0165 = 1.6 e⁻.
+// 9-frame bias masters have a neighbouring-pixel σ of 27.6–29.0 ADU over
+// two sessions, and with 25 ADU per count and EGAIN 0.2793 that bounds one
+// frame's read noise at 3·29.0·0.0112 = 0.97 e⁻ (astro-recommender's 2.15
+// is a vendor sheet's guess). The original Origin's the same way: σ 30.4
+// ADU, 3·30.4·0.0165 = 1.5 e⁻. Both Origins are RASAs, a mirror at prime
+// focus behind a 77 mm (Mark II) or 63 mm obstruction (Celestron). The
+// Seestar S50 writes INSTRUME 'ZWO ASI462MC' at its gain 80, so the ASI462
+// preset covers it.
 var readNoisePresets = []readNoisePreset{
-	{camera: "Origin678C", label: "≤ Celestron Origin Mark II at ISO 1000, from its bias master", setting: 1000, rn: 1.1},
-	{camera: "Origin178", label: "≤ Celestron Origin at ISO 200, from its bias master", setting: 200, rn: 1.6},
-	{camera: "ASI294MM", label: "IMX492 at gain 120", setting: 120, rn: 1.8},
-	{camera: "ASI294", label: "IMX294 at gain 120", setting: 120, rn: 1.7},
-	{camera: "ASI2600", label: "IMX571 at gain 100", setting: 100, rn: 1.4},
-	{camera: "ASI2400", label: "IMX410 at gain 140", setting: 140, rn: 1.5},
-	{camera: "ASI6200", label: "IMX455 at gain 100", setting: 100, rn: 1.35},
-	{camera: "ASI533", label: "IMX533 at gain 100", setting: 100, rn: 1.5},
-	{camera: "ASI585", label: "IMX585 at gain 200", setting: 200, rn: 1.0},
-	{camera: "ASI183", label: "IMX183 at gain 120", setting: 120, rn: 2.1},
-	{camera: "ASI678", label: "IMX678 at gain 182", setting: 182, rn: 0.9},
-	{camera: "ASI662", label: "IMX662 at gain 200", setting: 200, rn: 1.2},
-	{camera: "ASI664", label: "IMX664 at gain 252", setting: 252, rn: 0.8},
-	{camera: "ASI676", label: "IMX676 at gain 180", setting: 180, rn: 0.75},
-	{camera: "ASI461", label: "IMX461 at gain 100", setting: 100, rn: 1.45},
-	{camera: "ASI432", label: "IMX432 at gain 140", setting: 140, rn: 4.3},
-	{camera: "ASI174", label: "IMX174 at gain 300", setting: 300, rn: 3.5},
-	{camera: "ASI462", label: "IMX462 at gain 80", setting: 80, rn: 1.05},
-	{camera: "ASI178", label: "IMX178 at gain 100", setting: 100, rn: 1.7},
-	{camera: "ASI485", label: "IMX485 at gain 80", setting: 80, rn: 2.3},
-	{camera: "ASI482", label: "IMX482 at gain 80", setting: 80, rn: 4.5},
-	{camera: "ASI224", label: "IMX224 at gain 60", setting: 60, rn: 1.6},
-	{camera: "Neptune-C II", label: "IMX464 at gain 83", setting: 83, rn: 1.2},
+	{camera: "Origin678C", label: "≤ Celestron Origin Mark II at ISO 1000, from its bias master", setting: 1000, rn: 0.97, chip: imx678, obstruction: 77, throughput: 0.81},
+	{camera: "Origin178", label: "≤ Celestron Origin at ISO 200, from its bias master", setting: 200, rn: 1.5, chip: imx178, obstruction: 63, throughput: 0.81},
+	{camera: "ASI294MM", label: "IMX492 at gain 120", setting: 120, rn: 1.8, chip: "IMX492"},
+	{camera: "ASI294", label: "IMX294 at gain 120", setting: 120, rn: 1.7, chip: "IMX294"},
+	{camera: "ASI2600", label: "IMX571 at gain 100", setting: 100, rn: 1.4, chip: "IMX571"},
+	{camera: "ASI2400", label: "IMX410 at gain 140", setting: 140, rn: 1.5, chip: "IMX410"},
+	{camera: "ASI6200", label: "IMX455 at gain 100", setting: 100, rn: 1.35, chip: "IMX455"},
+	{camera: "ASI533", label: "IMX533 at gain 100", setting: 100, rn: 1.5, chip: "IMX533"},
+	{camera: "ASI585", label: "IMX585 at gain 200", setting: 200, rn: 1.0, chip: "IMX585"},
+	{camera: "ASI183", label: "IMX183 at gain 120", setting: 120, rn: 2.1, chip: "IMX183"},
+	{camera: "ASI678", label: "IMX678 at gain 182", setting: 182, rn: 0.9, chip: imx678},
+	{camera: "ASI662", label: "IMX662 at gain 200", setting: 200, rn: 1.2, chip: "IMX662"},
+	{camera: "ASI664", label: "IMX664 at gain 252", setting: 252, rn: 0.8, chip: "IMX664"},
+	{camera: "ASI676", label: "IMX676 at gain 180", setting: 180, rn: 0.75, chip: "IMX676"},
+	{camera: "ASI461", label: "IMX461 at gain 100", setting: 100, rn: 1.45, chip: "IMX461"},
+	{camera: "ASI432", label: "IMX432 at gain 140", setting: 140, rn: 4.3, chip: "IMX432"},
+	{camera: "ASI174", label: "IMX174 at gain 300", setting: 300, rn: 3.5, chip: "IMX174"},
+	{camera: "ASI462", label: "IMX462 at gain 80", setting: 80, rn: 1.05, chip: "IMX462"},
+	{camera: "ASI178", label: "IMX178 at gain 100", setting: 100, rn: 1.7, chip: imx178},
+	{camera: "ASI485", label: "IMX485 at gain 80", setting: 80, rn: 2.3, chip: "IMX485"},
+	{camera: "ASI482", label: "IMX482 at gain 80", setting: 80, rn: 4.5, chip: "IMX482"},
+	{camera: "ASI224", label: "IMX224 at gain 60", setting: 60, rn: 1.6, chip: "IMX224"},
+	{camera: "ASI715", label: "IMX715 at gain 100", setting: 100, rn: 1.2, chip: "IMX715"},
+	{camera: "ASI4400", label: "IMX366 at gain 136", setting: 136, rn: 1.7, chip: "IMX366"},
+	{camera: "ASI1600", label: "MN34230 at gain 139", setting: 139, rn: 1.8, chip: "MN34230"},
+	{camera: "ASI290", label: "IMX290 at gain 60", setting: 60, rn: 1.65, chip: "IMX290"},
+	{camera: "ASI220", label: "SC2210 at gain 106", setting: 106, rn: 1.03, chip: "SC2210"},
+	{camera: "ASI120", label: "AR0130 at gain 33", setting: 33, rn: 3.9, chip: "AR0130"},
+	{camera: "Neptune-C II", label: "IMX464 at gain 83", setting: 83, rn: 1.2, chip: "IMX464"},
+}
+
+// preset returns the frame's camera preset, at any gain setting.
+func preset(m fits.Meta) (readNoisePreset, bool) {
+	cam := strings.ToUpper(m.Camera)
+	for _, p := range readNoisePresets {
+		if strings.Contains(cam, strings.ToUpper(p.camera)) {
+			return p, true
+		}
+	}
+
+	return readNoisePreset{}, false
 }
 
 // presetReadNoise returns the read noise preset for the frame's camera and
 // gain setting, or NaN.
 func presetReadNoise(m fits.Meta) (float64, string) {
-	cam := strings.ToUpper(m.Camera)
-	for _, p := range readNoisePresets {
-		if strings.Contains(cam, strings.ToUpper(p.camera)) && m.Setting == p.setting {
-			return p.rn, p.label
-		}
+	if p, ok := preset(m); ok && m.Setting == p.setting {
+		return p.rn, p.label
 	}
 
 	return math.NaN(), ""
@@ -137,6 +157,9 @@ func subLength(w io.Writer, frames []Frame, label string, rn float64, src string
 		if shot > 0 {
 			fmt.Fprintf(w, "                  shot noise %.2g e⁻/s (sky, target, dark): read noise costs ≤ %.0f%% SNR from %.0f s\n",
 				shot, readCost*100, rn*rn/(shot*(1/((1-readCost)*(1-readCost))-1)))
+			if d := darkLine(frames); d != "" {
+				fmt.Fprintln(w, "                  "+d)
+			}
 		} else {
 			fmt.Fprintln(w, "                  no more than the read noise: check -gain and -read-noise")
 			shot = math.NaN()
@@ -200,4 +223,31 @@ func rotationRates(frames []Frame, exp float64) []float64 {
 	}
 
 	return rates
+}
+
+// darkLine estimates the dark current's part of the shot noise from the
+// camera chip's chart at the median sensor temperature, "" when either is
+// unknown.
+func darkLine(frames []Frame) string {
+	p, ok := preset(frames[0].Result.Meta)
+	if !ok {
+		return ""
+	}
+	var temps []float64
+	for _, f := range frames {
+		if !math.IsNaN(f.Result.Temp) {
+			temps = append(temps, f.Result.Temp)
+		}
+	}
+	t := stats.MedianOf(temps)
+	if math.IsNaN(t) {
+		return ""
+	}
+	c := chips[p.chip]
+	src := p.chip + "'s chart"
+	if c.dark == 0 {
+		src = "a typical chip's, " + p.chip + " uncharted"
+	}
+
+	return fmt.Sprintf("dark current ≈ %.2g e⁻/s at %.0f °C (%s, doubling every 5 °C)", darkRate(c, t), t, src)
 }

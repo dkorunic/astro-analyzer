@@ -138,6 +138,8 @@ func main() {
 	if !slices.ContainsFunc(frames, func(f report.Frame) bool { return f.Result.Date == "" }) {
 		slices.SortStableFunc(frames, func(a, b report.Frame) int { return cmp.Compare(a.Result.Date, b.Result.Date) })
 	}
+	rn, src := readNoiseFor(*readNoise, frames, calib)
+	report.SkyBrightness(frames, rn)
 	report.Score(frames)
 	report.FlagOutliers(frames, *k, *minDev)
 	report.FlagWorst(frames, *best)
@@ -156,7 +158,6 @@ func main() {
 	default:
 		report.Table(os.Stdout, frames)
 		report.Overview(os.Stdout, frames)
-		rn, src := readNoiseFor(*readNoise, frames, calib)
 		report.Calibration(os.Stdout, frames, calib, rn, fits.PairGain)
 		report.Summary(os.Stdout, frames)
 		report.Field(os.Stdout, frames)

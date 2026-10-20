@@ -286,22 +286,23 @@ func TestWeighting(t *testing.T) {
 }
 
 // TestSubLength checks the SNR and smear arithmetic: 2 e⁻/s of shot noise
-// and 1.1 e⁻ read noise leave √(2/(2 + 1.21/10)) = 97.1% at 10 s, and
-// 0.005°/s turns the 2214.6 px corner radius by 1.93 px in 10 s.
+// and 0.97 e⁻ read noise leave √(2/(2 + 0.9409/10)) = 97.7% at 10 s, and
+// 0.005°/s turns the 2214.6 px corner radius by 1.93 px in 10 s. At 20 °C
+// a chip without a chart makes 0.16·2⁻¹ = 0.08 e⁻/s of dark current.
 func TestSubLength(t *testing.T) {
 	start := time.Date(2026, 10, 2, 21, 0, 0, 0, time.UTC)
 	var frames []Frame
 	for i := range 20 {
 		th := float64(i) * 0.075 * math.Pi / 180
-		r := analyze.Result{FWHM: 5, NoiseE: math.Sqrt(2*15 + 1.1*1.1)}
-		r.Exp, r.Camera, r.Setting, r.Size = 15, "Origin678C-x", 1000, [2]int{3856, 2180}
+		r := analyze.Result{FWHM: 5, NoiseE: math.Sqrt(2*15 + 0.97*0.97)}
+		r.Exp, r.Camera, r.Setting, r.Size, r.Temp = 15, "Origin678C-x", 1000, [2]int{3856, 2180}, 20
 		r.Time = start.Add(time.Duration(i) * 15 * time.Second)
 		r.WCS = fits.WCS{OK: true, CD: [2][2]float64{{math.Cos(th), -math.Sin(th)}, {math.Sin(th), math.Cos(th)}}}
 		frames = append(frames, Frame{Result: r})
 	}
 	var b bytes.Buffer
 	SubLength(&b, frames, 0, "")
-	for _, want := range []string{"read noise 1.1 e⁻ (≤ Celestron", "  10 s     97.1%                 1.9 / 1.9 px\n", "15 s", "← now"} {
+	for _, want := range []string{"read noise 0.97 e⁻ (≤ Celestron", "  10 s     97.7%                 1.9 / 1.9 px\n", "15 s", "← now", "dark current ≈ 0.08 e⁻/s at 20 °C (a typical chip's, IMX678 uncharted"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, b.String())
 		}
