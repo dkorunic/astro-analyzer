@@ -315,6 +315,29 @@ func TestSubLength(t *testing.T) {
 	}
 }
 
+// TestDepth checks the depth arithmetic: 100 subs of 15 s, half at PSFSW 1
+// and half at 0.5, count as 75²/62.5 = 90. With 2 e⁻/s of shot noise, 0.97
+// e⁻ read noise and 2″ pixels, SNR 5 per arcsec² needs 5·√30.94·2 /
+// (15·√90·2) = 0.195 of the sky: 1.77 mag under a 20 mag sky, and 4× the
+// time adds 1.25·log₁₀4 = 0.75 mag. One night, so another adds under 10%
+// SNR past 1350/0.21 s = 1 h 47 min, at +1.25·log₁₀(1/0.21) = 0.85 mag:
+// 100/90 of that in subs.
+func TestDepth(t *testing.T) {
+	frames := make([]Frame, 100)
+	for i := range frames {
+		frames[i].SkyMag = 20
+		frames[i].Result.Plate = 2
+		frames[i].Result.PSFSW = 1 - 0.5*float64(i%2)
+	}
+	var b bytes.Buffer
+	depth(&b, frames, 15, 2*15+0.97*0.97, 2)
+	for _, want := range []string{"0 h 25 min in 100 subs, 0 h 23 min by PSF Signal Weight: SNR 5 per arcsec² at 21.77 mag/arcsec²", "22.53 mag/arcsec²  200%", "diminishing returns past 1 h 47 min (≈ 1 h 59 min of subs, 22.62 mag/arcsec²)", "21.77 mag/arcsec²  100% ← now"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, b.String())
+		}
+	}
+}
+
 func TestCalibration(t *testing.T) {
 	light := analyze.Result{}
 	light.Exp, light.Setting, light.Temp, light.Filter, light.Size = 20, 200, 15, "Nebula", [2]int{3056, 2048}

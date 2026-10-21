@@ -27,6 +27,10 @@ const (
 	// pause (meridian, refocus) and do not measure the rotation rate.
 	subGap   = 3
 	minPairs = 10 // rotation rates needed for the smear columns
+	// snrDepth is the Rose criterion: SNR 5 tells a feature from noise.
+	snrDepth = 5
+	// nightGain: past the knee another night adds less than 10% SNR.
+	nightGain = 0.10
 )
 
 // subLengths are the sub lengths compared, seconds; the session's own is
@@ -189,14 +193,14 @@ func subLength(w io.Writer, frames []Frame, label string, rn float64, src string
 	}
 	fmt.Fprintf(w, "\nSub length%s: %g s subs\n", label, t)
 
-	shot := math.NaN() // e⁻/s per pixel
+	shot, v := math.NaN(), math.NaN() // e⁻/s and e⁻² per pixel
 	switch {
 	case !(rn > 0):
 		fmt.Fprintln(w, "  Read noise      unknown for this camera and gain: set -read-noise (e⁻) to compare SNR")
 	case len(vars) == 0:
 		fmt.Fprintf(w, "  Read noise      %.2g e⁻ (%s), but the gain is unknown: set -gain\n", rn, src)
 	default:
-		v := stats.MedianOf(vars)
+		v = stats.MedianOf(vars)
 		shot = (v - rn*rn) / t
 		fmt.Fprintf(w, "  Noise           %.1f e⁻ per pixel, read noise %.2g e⁻ (%s)\n", math.Sqrt(v), rn, src)
 		if shot > 0 {
@@ -209,6 +213,10 @@ func subLength(w io.Writer, frames []Frame, label string, rn float64, src string
 			fmt.Fprintln(w, "                  no more than the read noise: check -gain and -read-noise")
 			shot = math.NaN()
 		}
+	}
+
+	if !math.IsNaN(shot) {
+		depth(w, frames, t, v, shot)
 	}
 
 	rates := rotationRates(frames, t)
@@ -251,6 +259,81 @@ func subLength(w io.Writer, frames []Frame, label string, rn float64, src string
 		}
 		fmt.Fprintln(w, strings.TrimRight(row, " "))
 	}
+}
+
+// depth prints the faintest surface brightness the stack reaches at SNR
+// snrDepth per arcsec², and how it grows with more integration. Per sub a
+// signal S (e⁻/s per arcsec²) gives S·t against √(v/plate²) of noise, so
+// N subs reach S/sky = snrDepth·√v·plate / (t·√N·B), B being the shot
+// rate: depth grows 1.25·log₁₀ mag per factor of time. N is the subs'
+// effective count under WBPP's PSF Signal Weight, (Σw)²/Σw².
+//
+// ponytail: dark current counts as sky and target light as sky (as in
+// skyMag); no flat-field or pattern-noise floor, which would end the √N
+// growth sooner. Add one from the master flat's noise when it matters.
+func depth(w io.Writer, frames []Frame, t, v, shot float64) {
+	plate := frames[0].Result.Plate
+	if !(plate > 0) {
+		return
+	}
+	var sum, sum2 float64
+	var sky []float64
+	known := 0
+	for _, f := range frames {
+		if wt := f.Result.PSFSW; wt > 0 {
+			sum, sum2, known = sum+wt, sum2+wt*wt, known+1
+		}
+		if f.SkyMag > 0 { // also false for NaN
+			sky = append(sky, f.SkyMag)
+		}
+	}
+	n := float64(len(frames))
+	weighted := ""
+	if 2*known >= len(frames) { // ponytail: frames without a weight count as average ones
+		n *= sum * sum / sum2 / float64(known)
+		weighted = fmt.Sprintf(", %s by PSF Signal Weight", hours(n*t))
+	}
+	under := -2.5 * math.Log10(snrDepth*math.Sqrt(v)*plate/(t*math.Sqrt(n)*shot))
+	mu := math.NaN()
+	if len(sky) > 0 {
+		mu = stats.Median(sky) + under
+	}
+	at := func(m float64) string { // depth after m times the integration
+		d := 1.25 * math.Log10(m)
+		if math.IsNaN(mu) {
+			return fmt.Sprintf("sky + %.2f mag", under+d)
+		}
+
+		return fmt.Sprintf("%.2f mag/arcsec²", mu+d)
+	}
+	fmt.Fprintf(w, "  Depth           %s in %d subs%s: SNR %d per arcsec² at %s\n",
+		hours(float64(len(frames))*t), len(frames), weighted, snrDepth, at(1))
+
+	nights := len(byNight(frames))
+	if k := knee(n * t / float64(nights)); k > 0 {
+		clock := "" // the subs to shoot, at this session's share of weight
+		if weighted != "" {
+			clock = fmt.Sprintf("≈ %s of subs, ", hours(k*float64(len(frames))/n))
+		}
+		fmt.Fprintf(w, "                  diminishing returns past %s (%s%s)\n", hours(k), clock, at(k/(n*t)))
+	}
+	fmt.Fprintln(w, "  Time         Depth              SNR")
+	for _, m := range []float64{0.5, 1, 2, 4} {
+		row := fmt.Sprintf("  %-11s  %-17s  %.0f%%", hours(m*n*t), at(m), 100*math.Sqrt(m))
+		if m == 1 {
+			row += " ← now"
+		}
+		fmt.Fprintln(w, row)
+	}
+}
+
+// knee returns the effective integration (seconds) past which more is
+// diminishing returns, given night, the effective integration one night
+// of this session gathers (seconds): another such night adds less than
+// nightGain of SNR, at 1/((1+g)²−1) = 4.8 nights.
+func knee(night float64) float64 {
+	// At T = k·night another night multiplies SNR by √(1+1/k).
+	return night / ((1+nightGain)*(1+nightGain) - 1)
 }
 
 // rotationRates returns |dθ/dt| in degrees per second between consecutive

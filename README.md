@@ -422,7 +422,8 @@ WBPP: 1309 unflagged frames
 ### Sub-length comparison
 
 Last, a `Sub length` section per filter asks whether shorter (or longer)
-subs would do better, for the same total time:
+subs would do better, for the same total time, and how deep the stack
+reaches:
 
 - **Read noise** is paid once per sub, shot noise per second. Each raw
   pixel's noise in electrons (same-colour neighbours two apart in a row,
@@ -452,12 +453,32 @@ subs would do better, for the same total time:
 - **Field rotation** of an alt-az mount turns the field during each sub,
   smearing corner stars tangentially by r·ω·t. The rate ω comes from
   consecutive plate solutions; equatorial mounts show none.
+- **Depth** is the faintest surface brightness the stack shows at SNR 5
+  per arcsec² (the Rose criterion), from the same per-pixel noise: N subs
+  reach S/sky = 5·√σ²·plate / (t·√N·B), below the session's median sky
+  magnitude. N is the subs' effective count under WBPP's PSF Signal
+  Weight, (Σw)²/Σw², so weak frames count for less. SNR grows as √T, so
+  each doubling of the time adds 0.38 mag and the curve has no knee of
+  its own; **diminishing returns** start where another night like this
+  session's average adds less than 10% SNR, at 4.8 nights' effective
+  integration, shown also as the subs to shoot at the session's weight
+  per sub. Dark current and target light count as sky, and a
+  flat-field or pattern-noise floor, which would end the √T growth
+  sooner, is not modelled. Without a camera preset, depth reads as
+  magnitudes below the sky.
 
 ```
 Sub length: 15 s subs
   Noise           5.5 e⁻ per pixel, read noise 0.92 e⁻ (≤, from this session's 9-frame bias master)
                   shot noise 2 e⁻/s (sky, target, dark): read noise costs ≤ 5% SNR from 4 s
                   dark current ≈ 0.06 e⁻/s at 18 °C (a typical chip's, IMX678 uncharted, doubling every 5 °C)
+  Depth           5 h 35 min in 1340 subs, 4 h 39 min by PSF Signal Weight: SNR 5 per arcsec² at 23.33 mag/arcsec²
+                  diminishing returns past 11 h 05 min (≈ 13 h 18 min of subs, 23.80 mag/arcsec²)
+  Time         Depth              SNR
+  2 h 20 min   22.95 mag/arcsec²  71%
+  4 h 39 min   23.33 mag/arcsec²  100% ← now
+  9 h 19 min   23.70 mag/arcsec²  141%
+  18 h 37 min  24.08 mag/arcsec²  200%
   Field rotation  0.0076°/s median, 0.0121°/s p90; corner stars smear tangentially (median FWHM 5.08 px)
   Sub      SNR vs no read noise  Corner smear median / p90
   5 s      95.9%                 1.5 / 2.3 px
