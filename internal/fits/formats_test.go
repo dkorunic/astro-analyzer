@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -323,6 +324,30 @@ func TestHcompressWide(t *testing.T) {
 	}
 }
 
+// TestHcompressThin: a stream one pixel wide has empty quadrants, which
+// once got a one-byte quadtree buffer, and a quadtree code (0xf) for one
+// of them wrote past it. Whatever such a stream decodes to, it must not
+// panic.
+func TestHcompressThin(t *testing.T) {
+	for _, dims := range [][2]uint32{{1, 8}, {8, 1}, {1, 7}, {5, 1}} {
+		for b := range 256 {
+			s := binary.BigEndian.AppendUint32([]byte{0xDD, 0x99}, dims[0])
+			s = binary.BigEndian.AppendUint32(s, dims[1])
+			s = binary.BigEndian.AppendUint32(s, 0) // scale
+			s = binary.BigEndian.AppendUint64(s, 0) // sum
+			s = append(s, 1, 1, 1, 0x00, byte(b), 0xff, 0xff, 0xff, 0xff)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("%d × %d, byte %#02x: panic %v", dims[0], dims[1], b, r)
+					}
+				}()
+				_ = hdecompress(s, false, make([]float64, dims[0]*dims[1]))
+			}()
+		}
+	}
+}
+
 // TestRiceRunaway: a Rice code whose quotient runs past the data (all zero
 // bits from there) used to spin forever, as reading past the end pads with
 // zeros. Code 00001 is a split of 0 bits, then nothing but zeros.
@@ -383,6 +408,29 @@ func TestToADU(t *testing.T) {
 		if r := toADU(c.pix, c.bitpix); c.pix[0] != c.want || r != 65535 {
 			t.Errorf("BITPIX %d: %v, range %v; want %v, 65535", c.bitpix, c.pix[0], r, c.want)
 		}
+	}
+}
+
+// TestPairNoiseNormalised: bias frames normalised to [0, 1] give their
+// read noise in ADU, as Load gives their PixNoise; read raw it came out
+// 65535× too small. Stored v loads as 2v + 10 (writeImage).
+func TestPairNoiseNormalised(t *testing.T) {
+	const w, h = 600, 256 // 6400 differences: σ good to ~2%
+	rng := rand.New(rand.NewPCG(7, 8))
+	var paths [2]string
+	for k := range paths {
+		data := fill[float32](w*h, func(int) float64 {
+			v := (1000 + 10*rng.NormFloat64()) / 65535 // 10 ADU of read noise
+
+			return (v - 10) / 2
+		})
+		paths[k] = filepath.Join(t.TempDir(), "b.fits")
+		if err := writeImage(paths[k], -32, w, h, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rn, err := PairNoise(paths[0], paths[1]); err != nil || !(math.Abs(rn-10) < 1) {
+		t.Errorf("PairNoise = %v, %v; want 10 ADU", rn, err)
 	}
 }
 

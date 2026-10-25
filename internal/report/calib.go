@@ -271,7 +271,7 @@ func pedestal(darks, biases []Calib, gain float64) string {
 // it; it only matters where the lights are calibrated without a bias.
 func biasBanding(biases []Calib) string {
 	b := biases[0].Image
-	if !(b.PixNoise > 0) {
+	if !(b.PixNoise > 0) || math.IsNaN(b.Cal.Rows) || math.IsNaN(b.Cal.Cols) {
 		return ""
 	}
 

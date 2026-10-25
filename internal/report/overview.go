@@ -99,7 +99,9 @@ func overview(w io.Writer, frames []Frame, label string) {
 	nights := byNight(frames)
 	fmt.Fprintf(w, "\nIntegration%s: %d frames", label, len(frames))
 	if len(exps) == 1 {
-		fmt.Fprintf(w, " × %g s", frames[0].Result.Exp)
+		for e := range exps { // not frames[0]'s: it may have none
+			fmt.Fprintf(w, " × %g s", e)
+		}
 	}
 	if total > 0 {
 		fmt.Fprintf(w, " = %s, %s unflagged", hours(total), hours(kept))

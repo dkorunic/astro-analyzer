@@ -55,6 +55,17 @@ func TestOverviewNights(t *testing.T) {
 	}
 }
 
+// TestOverviewExposure: the one exposure the frames share is named even
+// when the first frame has none.
+func TestOverviewExposure(t *testing.T) {
+	frames := []Frame{{Result: analyze.Result{Exp: math.NaN()}}, {Result: analyze.Result{Exp: 300}}, {Result: analyze.Result{Exp: 300}}}
+	var b bytes.Buffer
+	Overview(&b, frames)
+	if s := b.String(); !strings.Contains(s, "3 frames × 300 s = 0 h 10 min") {
+		t.Errorf("integration line:\n%s", s)
+	}
+}
+
 // TestCoverage: a 2:1 frame turned 90° about its centre overlaps the
 // reference only in the central square, half of it.
 func TestCoverage(t *testing.T) {

@@ -511,6 +511,13 @@ func TestCalStats(t *testing.T) {
 	if c := img.Cal; !(math.Abs(c.Rows-3) < 0.5) || !(c.Cols < 0.5) {
 		t.Errorf("banding rows %v, columns %v; want 3, 0", c.Rows, c.Cols)
 	}
+	// One row has no row steps: unknown banding, not a panic.
+	if err := synth.WriteFITSSize(path, 400, 1, pix[:400], fitsio.Card{Name: "IMAGETYP", Value: "BIAS"}); err != nil {
+		t.Fatal(err)
+	}
+	if img, err := fits.Load(path); !errors.Is(err, fits.ErrNotLight) || !math.IsNaN(img.Cal.Rows) {
+		t.Errorf("one-row bias: rows %v, %v; want NaN, ErrNotLight", img.Cal.Rows, err)
+	}
 
 	for i := range pix {
 		x, y := i%synth.W, i/synth.W

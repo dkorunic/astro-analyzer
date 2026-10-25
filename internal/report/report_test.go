@@ -321,11 +321,18 @@ func TestSubLength(t *testing.T) {
 // (15·√90·2) = 0.195 of the sky: 1.77 mag under a 20 mag sky, and 4× the
 // time adds 1.25·log₁₀4 = 0.75 mag. One night, so another adds under 10%
 // SNR past 1350/0.21 s = 1 h 47 min, at +1.25·log₁₀(1/0.21) = 0.85 mag:
-// 100/90 of that in subs.
+// 100/90 of that in subs. The sky's median is 20 though the middle frames
+// in time order read 19: the depth takes the median, not the middle frame.
 func TestDepth(t *testing.T) {
 	frames := make([]Frame, 100)
 	for i := range frames {
 		frames[i].SkyMag = 20
+		switch {
+		case i < 20:
+			frames[i].SkyMag = 21
+		case i >= 40 && i < 60:
+			frames[i].SkyMag = 19
+		}
 		frames[i].Result.Plate = 2
 		frames[i].Result.PSFSW = 1 - 0.5*float64(i%2)
 	}

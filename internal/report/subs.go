@@ -296,7 +296,7 @@ func depth(w io.Writer, frames []Frame, t, v, shot float64) {
 	under := -2.5 * math.Log10(snrDepth*math.Sqrt(v)*plate/(t*math.Sqrt(n)*shot))
 	mu := math.NaN()
 	if len(sky) > 0 {
-		mu = stats.Median(sky) + under
+		mu = stats.MedianOf(sky) + under
 	}
 	at := func(m float64) string { // depth after m times the integration
 		d := 1.25 * math.Log10(m)

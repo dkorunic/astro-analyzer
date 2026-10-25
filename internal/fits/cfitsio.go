@@ -232,7 +232,9 @@ func dodecode(r *hbits, a []int64, nx, ny int, planes []byte) error {
 func qtreeDecode(r *hbits, a []int64, off, n, nqx, nqy, planes int) error {
 	log2n := log2Ceil(max(nqx, nqy))
 	nqx2, nqy2 := (nqx+1)/2, (nqy+1)/2
-	scratch := make([]byte, max(1, nqx2*nqy2))
+	// An empty quadrant (a 1-pixel-wide stream) still expands one code
+	// row or column wide: nqx2·nqy2 alone left one byte for it.
+	scratch := make([]byte, max(1, nqx2)*max(1, nqy2))
 	for bit := planes - 1; bit >= 0; bit-- {
 		switch r.nbits(4) {
 		case 0: // written directly

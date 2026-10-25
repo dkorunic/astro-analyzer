@@ -283,6 +283,9 @@ func banding(pix []float32, w, h int) (float64, float64) {
 		for i := 1; i < len(means); i++ {
 			d = append(d, (means[i]-means[i-1])/float64(n))
 		}
+		if len(d) == 0 { // one row or column: no neighbours to step between
+			return math.NaN()
+		}
 		slices.Sort(d)
 		k := len(d) - 1
 		sd := (d[k*841/1000] - d[k*159/1000]) / 2 / math.Sqrt2
@@ -474,8 +477,9 @@ func samples(im fitsio.Image) ([]float32, int, error) {
 }
 
 // pair reads two frames' samples, which must be the same size, and the
-// row width.
-func pair(a, b string) ([2][]float32, int, error) {
+// row width. adu puts calibration frames on the ADU scale, as Load does
+// (toADU); lights keep theirs.
+func pair(a, b string, adu bool) ([2][]float32, int, error) {
 	var pix [2][]float32
 	var w int
 	for i, p := range []string{a, b} {
@@ -485,9 +489,13 @@ func pair(a, b string) ([2][]float32, int, error) {
 		}
 		pix[i], _, err = src.read()
 		w = src.hdr.Axes()[0]
+		bitpix := src.hdr.Bitpix()
 		src.done()
 		if err != nil {
 			return pix, 0, err
+		}
+		if adu {
+			toADU(pix[i], bitpix)
 		}
 	}
 	if len(pix[0]) != len(pix[1]) {
@@ -500,9 +508,10 @@ func pair(a, b string) ([2][]float32, int, error) {
 // PairNoise is the read noise in ADU from two bias frames: the robust σ of
 // their difference over √2. Differencing cancels the fixed pattern that a
 // single frame's pixel-to-pixel noise still holds. Every 16th row and 3rd
-// pixel keep it cheap, as in pixNoise.
+// pixel keep it cheap, as in pixNoise. Frames normalised to [0, 1] are
+// read in ADU, as Load reads their PixNoise.
 func PairNoise(a, b string) (float64, error) {
-	pix, w, err := pair(a, b)
+	pix, w, err := pair(a, b, true)
 	if err != nil {
 		return math.NaN(), err
 	}
@@ -531,7 +540,7 @@ func PairNoise(a, b string) (float64, error) {
 // gain returned. Read noise stays in the variance, so it reads low by
 // RN²/σ²: under 3% on skies thousands of ADU above the pedestal.
 func PairGain(a, b string, pedestal float64) (float64, error) {
-	pix, _, err := pair(a, b)
+	pix, _, err := pair(a, b, false)
 	if err != nil {
 		return math.NaN(), err
 	}
@@ -568,9 +577,12 @@ func PairGain(a, b string, pedestal float64) (float64, error) {
 	return gains[len(gains)/2], nil
 }
 
-// spread is the robust σ of d (half the 16th–84th percentile span); it
-// sorts d.
+// spread is the robust σ of d (half the 16th–84th percentile span), NaN
+// when d is empty; it sorts d.
 func spread(d []float64) float64 {
+	if len(d) == 0 {
+		return math.NaN()
+	}
 	slices.Sort(d)
 	n := len(d) - 1
 
